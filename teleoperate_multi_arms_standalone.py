@@ -19,7 +19,7 @@ Example usage:
 python teleoperate_multi_arms_standalone.py
 
 # Custom motor IDs and settings:
-python teleoperate_multi_arms_standalone.py --motor_ids=1,2,3,4,5,6,7 --fps=30
+python teleoperate_multi_arms_standalone.py --motor_ids=1,2,3,4 --fps=30
 ```
 """
 
@@ -468,8 +468,8 @@ def teleoperation_loop(leaders: List[SO101Controller], followers: List[SO101Cont
 
 def main():
     parser = argparse.ArgumentParser(description="Multi-arm teleoperation for SO101 robots with STS3215 servos")
-    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7",
-                       help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6,7)")
+    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6",
+                       help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6)")
     parser.add_argument("--baudrate", type=int, default=1000000,
                        help="Baudrate (default: 1000000)")
     parser.add_argument("--fps", type=int, default=60,
