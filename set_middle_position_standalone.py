@@ -304,6 +304,19 @@ class FeetechController:
                 time.sleep(0.8)  # Longer delay if there were failures
         
         logger.info("Calibration reset complete.")
+    
+    def read_homing_offset(self, motor_id: int) -> int | None:
+        """Read the current homing offset from a motor."""
+        offset, result, error = self.packet_handler.read2ByteTxRx(
+            self.port_handler, motor_id, self.HOMING_OFFSET)
+        
+        if result == self.scs.COMM_SUCCESS:
+            # Decode sign-magnitude if needed
+            if offset & (1 << 11):  # Check sign bit
+                offset = -(offset & 0x7FF)  # Clear sign bit and negate
+            return offset
+        else:
+            return None
             
     def write_homing_offsets(self, offsets: Dict[int, int]) -> None:
         """Write homing offsets to all motors."""
@@ -335,7 +348,7 @@ class FeetechController:
                     result, error = self.packet_handler.write2ByteTxRx(
                         self.port_handler, motor_id, self.HOMING_OFFSET, encoded_offset)
                     if result == self.scs.COMM_SUCCESS:
-                        logger.info(f"  ✓ Motor {motor_id}: offset {original_offset} ({i+1}/{len(offsets)})")
+                        logger.info(f"  ✓ Motor {motor_id}: wrote offset {original_offset} (encoded: {encoded_offset}) ({i+1}/{len(offsets)})")
                         success = True
                         break
                     else:
@@ -348,6 +361,17 @@ class FeetechController:
                         logger.warning(f"Exception writing to motor {motor_id} (attempt {attempt+1}/3): {e}")
                     else:
                         logger.error(f"Failed to write homing offset to motor {motor_id} after 3 attempts: {e}")
+            
+            # Verify the offset was written correctly
+            if success:
+                time.sleep(0.2)  # Small delay before reading back
+                read_offset = self.read_homing_offset(motor_id)
+                if read_offset is not None and read_offset == original_offset:
+                    logger.debug(f"    Verified: offset {read_offset} matches")
+                elif read_offset is not None:
+                    logger.warning(f"    Warning: read offset {read_offset} doesn't match written {original_offset}")
+                else:
+                    logger.warning(f"    Warning: couldn't verify offset")
             
             # Always add delay between motors, even longer if write failed
             if success:
@@ -389,14 +413,22 @@ class FeetechController:
         
         Formula from LeRobot:
         On Feetech Motors: Present_Position = Actual_Position - Homing_Offset
-        To make current position become the middle (2048 for 4096 resolution):
-        homing_offset = current_position - (resolution / 2)
+        
+        To make the motor read 2048 (middle) at its current physical position:
+        - We want: Present_Position = 2048
+        - We have: Actual_Position = current reading
+        - Therefore: 2048 = Actual_Position - Homing_Offset
+        - So: Homing_Offset = Actual_Position - 2048
         """
         offsets = {}
-        for motor_id, pos in positions.items():
-            # For Feetech: homing_offset = current_pos - int(max_res / 2)
-            middle_position = int(self.resolution / 2)
-            offsets[motor_id] = pos - middle_position
+        middle_position = int(self.resolution / 2)  # 2048 for 4096 resolution
+        
+        logger.info(f"\nCalculating offsets to make motors read {middle_position}:")
+        for motor_id, current_pos in positions.items():
+            offset = current_pos - middle_position
+            offsets[motor_id] = offset
+            logger.info(f"  Motor {motor_id}: current={current_pos} → offset={offset} → will read {middle_position}")
+            
         return offsets
 
 
@@ -446,12 +478,6 @@ def set_middle_position(controller: FeetechController) -> int:
     # Calculate homing offsets
     offsets = controller.calculate_homing_offsets(positions)
     
-    # Display calculated offsets
-    logger.info("\nCalculated homing offsets:")
-    for motor_id, offset in offsets.items():
-        current_pos = positions.get(motor_id, 0)
-        logger.info(f"  Motor {motor_id}: current={current_pos}, offset={offset}")
-    
     # Add delay before writing to allow bus to stabilize
     logger.info("\nWaiting for bus to stabilize...")
     time.sleep(1.0)
@@ -464,9 +490,42 @@ def set_middle_position(controller: FeetechController) -> int:
     # Write homing offsets
     controller.write_homing_offsets(offsets)
     
-    logger.info("\n✓ Middle position set successfully!")
-    logger.info("The current position is now the middle point for all servos.")
-    logger.info(f"Phase (Setting byte) has been set to {phase_value} for all servos.")
+    # Wait a bit for the offsets to take effect
+    logger.info("\nVerifying middle position settings...")
+    time.sleep(1.0)
+    
+    # Read positions again to verify they are now at 2048
+    verify_positions = controller.read_positions()
+    all_correct = True
+    logger.info("\nVerification results:")
+    for motor_id in controller.motor_ids:
+        current_pos = verify_positions.get(motor_id, -1)
+        expected_pos = int(controller.resolution / 2)  # Should be 2048
+        
+        if current_pos == -1:
+            logger.error(f"  Motor {motor_id}: Failed to read position")
+            all_correct = False
+        elif abs(current_pos - expected_pos) <= 10:  # Allow small tolerance
+            logger.info(f"  ✓ Motor {motor_id}: {current_pos} (expected ~{expected_pos})")
+        else:
+            logger.error(f"  ✗ Motor {motor_id}: {current_pos} (expected {expected_pos})")
+            all_correct = False
+    
+    if all_correct:
+        logger.info("\n✓ Middle position set successfully!")
+        logger.info("All motors now read ~2048 at their current physical position.")
+        logger.info("\nWhat this means:")
+        logger.info("- The current physical position is now the center of each motor's range")
+        logger.info("- Moving the motor will show values from 0-4095 centered at 2048")
+        logger.info("- You can use the monitor_positions_standalone.py script to verify")
+    else:
+        logger.warning("\n⚠ Some motors did not reach the expected middle position (2048).")
+        logger.warning("Possible issues:")
+        logger.warning("- The homing offset might need a power cycle to take effect")
+        logger.warning("- There could be communication issues")
+        logger.warning("- Try running the calibration again")
+    
+    logger.info(f"\nPhase (Setting byte) has been set to {phase_value} for all servos.")
     
     return phase_value
 
