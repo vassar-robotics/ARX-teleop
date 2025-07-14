@@ -2,26 +2,21 @@
 """
 Standalone script to set Feetech servo motors to their middle position.
 
-This script connects to Feetech servo motors, disables torque, and sets the homing
-offsets so that the current position becomes the middle point of the servo's range.
+This script follows the exact logic from LeRobot's set_middle_position.py,
+implementing the same algorithm in a standalone fashion.
 
-Requirements:
-- pyserial
-- scservo_sdk (for Feetech motors)
+The key steps are:
+1. Disable torque
+2. Set Phase=76 and Lock=0
+3. Set operating mode to position mode
+4. Reset calibration (homing offset to 0, limits to full range)
+5. Read current positions
+6. Calculate homing offsets (current_position - 2048)
+7. Write homing offsets
 
 Example usage:
 ```shell
-# Basic usage (uses defaults: motor IDs 1-6, auto-detect port, baudrate 1M):
 python set_middle_position_standalone.py
-
-# Custom motor IDs:
-python set_middle_position_standalone.py --motor_ids=1,2,3,4
-
-# Specify port manually:
-python set_middle_position_standalone.py --port=/dev/ttyUSB0
-
-# Continuous mode for multiple robots:
-python set_middle_position_standalone.py --continuous
 ```
 """
 
@@ -30,10 +25,10 @@ import logging
 import platform
 import sys
 import time
-from typing import Dict, List, Any
+from typing import Dict, List, Optional, Any
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -77,641 +72,262 @@ def auto_detect_port() -> str:
                           "Please disconnect all but one robot or specify port manually.")
 
 
-def wait_for_keypress() -> bool:
-    """Wait for spacebar or 'q' key press. Returns True for space, False for 'q'."""
-    try:
-        # For Unix-like systems (Linux, macOS)
-        import termios
-        import tty
-        
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(sys.stdin.fileno())
-            while True:
-                key = sys.stdin.read(1)
-                if key == ' ':
-                    return True
-                elif key.lower() == 'q':
-                    return False
-                elif key == '\x03':  # Ctrl+C
-                    raise KeyboardInterrupt
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    except ImportError:
-        # Fallback for Windows
-        import msvcrt
-        
-        while True:
-            if msvcrt.kbhit():
-                key = msvcrt.getch()
-                if key == b' ':
-                    return True
-                elif key.lower() == b'q':
-                    return False
-    except Exception:
-        # Ultimate fallback
-        response = input("\nPress Enter to continue or 'q' to quit: ")
-        return response.lower() != 'q'
+def encode_sign_magnitude(value: int, sign_bit_index: int) -> int:
+    """
+    Encode a signed integer using sign-magnitude representation.
+    Copied from LeRobot's encoding_utils.py
+    """
+    max_magnitude = (1 << sign_bit_index) - 1
+    magnitude = abs(value)
+    if magnitude > max_magnitude:
+        raise ValueError(f"Magnitude {magnitude} exceeds {max_magnitude} (max for {sign_bit_index=})")
+
+    direction_bit = 1 if value < 0 else 0
+    return (direction_bit << sign_bit_index) | magnitude
 
 
-class FeetechController:
-    """Controller for Feetech motors."""
+class FeetechBus:
+    """
+    Simplified Feetech motor bus that implements only what's needed for calibration.
+    This follows the exact logic from LeRobot's FeetechMotorsBus.
+    """
     
-    # Feetech register addresses (for STS/SMS series)
+    # Feetech register addresses
     TORQUE_ENABLE = 40
-    PRESENT_POSITION = 56
-    HOMING_OFFSET = 31
-    OPERATING_MODE = 33
-    PHASE = 18
     LOCK = 55
-    PRESENT_VOLTAGE = 62
+    PHASE = 18
+    OPERATING_MODE = 33
+    HOMING_OFFSET = 31
     MIN_POSITION_LIMIT = 9
     MAX_POSITION_LIMIT = 11
+    PRESENT_POSITION = 56
     
-    def __init__(self, port: str, motor_ids: List[int], baudrate: int = 1000000, 
+    # Model resolutions
+    RESOLUTIONS = {
+        "sts3215": 4096,
+        "sts3250": 4096,
+        "sm8512bl": 65536,
+        "scs0009": 1024,
+    }
+    
+    def __init__(self, port: str, motor_ids: List[int], baudrate: int = 1000000,
                  motor_model: str = "sts3215"):
         self.port = port
         self.motor_ids = motor_ids
         self.baudrate = baudrate
         self.motor_model = motor_model
-        self.connected = False
+        self.resolution = self.RESOLUTIONS.get(motor_model, 4096)
         
-        # Set resolution based on motor model
-        if motor_model in ["sts3215", "sts3250"]:
-            self.resolution = 4096
-        elif motor_model == "sm8512bl":
-            self.resolution = 65536
-        elif motor_model == "scs0009":
-            self.resolution = 1024
-        else:
-            self.resolution = 4096  # Default
-            
         try:
             import scservo_sdk as scs  # type: ignore
             self.scs = scs
         except ImportError:
             raise RuntimeError("scservo_sdk not installed. Please install from Feetech SDK")
-            
+        
         self.port_handler: Any = None
         self.packet_handler: Any = None
         
     def connect(self) -> None:
-        """Connect to the Feetech bus."""
+        """Connect to the motor bus."""
         self.port_handler = self.scs.PortHandler(self.port)
-        self.packet_handler = self.scs.PacketHandler(0)  # Protocol 0 for most Feetech
+        self.packet_handler = self.scs.PacketHandler(0)  # Protocol 0 for Feetech
         
         if not self.port_handler.openPort():
             raise RuntimeError(f"Failed to open port '{self.port}'")
             
         if not self.port_handler.setBaudRate(self.baudrate):
             raise RuntimeError(f"Failed to set baudrate to {self.baudrate}")
-            
+        
         # Test connection by pinging motors
         for motor_id in self.motor_ids:
             try:
                 ping_result = self.packet_handler.ping(self.port_handler, motor_id)
                 # Handle different return formats from Feetech SDK
-                if len(ping_result) >= 3:
-                    model_number, result, error = ping_result
-                elif len(ping_result) == 2:
-                    model_number, result = ping_result
-                    error = 0
+                if isinstance(ping_result, tuple) and len(ping_result) >= 2:
+                    if len(ping_result) >= 3:
+                        model_number, result, error = ping_result[:3]
+                    else:
+                        model_number, result = ping_result[:2]
+                    
+                    if result != self.scs.COMM_SUCCESS:
+                        raise RuntimeError(f"Failed to ping motor {motor_id}")
                 else:
-                    raise RuntimeError(f"Unexpected ping result format: {ping_result}")
-                
-                if result != self.scs.COMM_SUCCESS:
-                    raise RuntimeError(f"Failed to ping motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+                    raise RuntimeError(f"Unexpected ping result: {ping_result}")
             except Exception as e:
                 raise RuntimeError(f"Failed to ping motor {motor_id}: {str(e)}")
-                
-        self.connected = True
+        
         logger.info(f"Connected to Feetech motors: {self.motor_ids}")
         
     def disconnect(self) -> None:
-        """Disconnect from the Feetech bus."""
+        """Disconnect from the motor bus."""
         if self.port_handler:
             self.port_handler.closePort()
-        self.connected = False
+            logger.info("Disconnected from motors.")
+    
+    def write(self, data_name: str, motor_id: int, value: int) -> None:
+        """Write a value to a motor register. This follows LeRobot's bus.write() logic."""
+        if self.packet_handler is None or self.port_handler is None:
+            raise RuntimeError("Not connected to motors")
+            
+        # Get register address and size
+        if data_name == "Torque_Enable":
+            addr, size = self.TORQUE_ENABLE, 1
+        elif data_name == "Lock":
+            addr, size = self.LOCK, 1
+        elif data_name == "Phase":
+            addr, size = self.PHASE, 1
+        elif data_name == "Operating_Mode":
+            addr, size = self.OPERATING_MODE, 1
+        elif data_name == "Homing_Offset":
+            addr, size = self.HOMING_OFFSET, 2
+            # Apply sign-magnitude encoding for Homing_Offset (11-bit sign)
+            if value < 0:
+                value = encode_sign_magnitude(value, 11)
+        elif data_name == "Min_Position_Limit":
+            addr, size = self.MIN_POSITION_LIMIT, 2
+        elif data_name == "Max_Position_Limit":
+            addr, size = self.MAX_POSITION_LIMIT, 2
+        else:
+            raise ValueError(f"Unknown data_name: {data_name}")
         
-    def read_voltage(self) -> float:
-        """Read voltage from the first motor."""
-        motor_id = self.motor_ids[0]
-        try:
-            read_result = self.packet_handler.read1ByteTxRx(
-                self.port_handler, motor_id, self.PRESENT_VOLTAGE)
-            
-            # Handle different return formats
-            if len(read_result) >= 3:
-                raw_voltage, result, error = read_result
-            elif len(read_result) == 2:
-                raw_voltage, result = read_result
-                error = 0
-            else:
-                raise RuntimeError(f"Unexpected read result format: {read_result}")
-            
-            if result != self.scs.COMM_SUCCESS:
-                raise RuntimeError(f"Failed to read voltage: {self.packet_handler.getTxRxResult(result)}")
-                
-            # Feetech motors report voltage in units of 0.1V
-            return raw_voltage / 10.0
-        except Exception as e:
-            raise RuntimeError(f"Failed to read voltage from motor {motor_id}: {str(e)}")
+        # Write the value
+        if size == 1:
+            result, error = self.packet_handler.write1ByteTxRx(
+                self.port_handler, motor_id, addr, value)
+        else:  # size == 2
+            result, error = self.packet_handler.write2ByteTxRx(
+                self.port_handler, motor_id, addr, value)
         
-    def disable_torque(self) -> None:
-        """Disable torque on all motors."""
-        for motor_id in self.motor_ids:
-            # Disable torque
-            result, error = self.packet_handler.write1ByteTxRx(
-                self.port_handler, motor_id, self.TORQUE_ENABLE, 0)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to disable torque on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
-                
-            # Set Lock to 0
-            result, error = self.packet_handler.write1ByteTxRx(
-                self.port_handler, motor_id, self.LOCK, 0)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to set lock on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+        if result != self.scs.COMM_SUCCESS:
+            logger.warning(f"Failed to write {data_name} to motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+    
+    def sync_read(self, data_name: str, motor_ids: Optional[List[int]] = None) -> Dict[int, int]:
+        """Read values from multiple motors. This follows LeRobot's sync_read logic."""
+        if self.packet_handler is None or self.port_handler is None:
+            raise RuntimeError("Not connected to motors")
             
-            # Add delay to prevent bus bandwidth issues
-            time.sleep(0.1)  # Shorter delay since these are single-byte writes
-                
-    def read_positions(self) -> Dict[int, int]:
-        """Read current positions from all motors."""
+        if motor_ids is None:
+            motor_ids = self.motor_ids
+        
+        if data_name != "Present_Position":
+            raise ValueError(f"sync_read only implemented for Present_Position, not {data_name}")
+        
         positions = {}
-        for motor_id in self.motor_ids:
+        for motor_id in motor_ids:
             try:
-                read_result = self.packet_handler.read2ByteTxRx(
+                result = self.packet_handler.read2ByteTxRx(
                     self.port_handler, motor_id, self.PRESENT_POSITION)
                 
                 # Handle different return formats
-                if len(read_result) >= 3:
-                    position, result, error = read_result
-                elif len(read_result) == 2:
-                    position, result = read_result
-                    error = 0
-                else:
-                    logger.warning(f"Unexpected read result format from motor {motor_id}: {read_result}")
-                    continue
+                if isinstance(result, tuple) and len(result) >= 2:
+                    if len(result) >= 3:
+                        position, comm_result, error = result[:3]
+                    else:
+                        position, comm_result = result[:2]
                     
-                if result == self.scs.COMM_SUCCESS:
-                    positions[motor_id] = position
+                    if comm_result == self.scs.COMM_SUCCESS:
+                        positions[motor_id] = position
+                    else:
+                        logger.warning(f"Failed to read position from motor {motor_id}")
                 else:
-                    logger.warning(f"Failed to read position from motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+                    logger.warning(f"Unexpected read result from motor {motor_id}: {result}")
             except Exception as e:
-                logger.warning(f"Exception reading position from motor {motor_id}: {e}")
+                logger.warning(f"Exception reading motor {motor_id}: {e}")
+        
         return positions
-        
-    def reset_calibration(self) -> None:
-        """Reset calibration to factory defaults before setting new homing offsets.
-        
-        This is a critical step from LeRobot that ensures:
-        1. Homing offset starts at 0
-        2. Position limits are set to full range (0 to resolution-1)
-        3. The motor has a clean state before applying new calibration
-        """
-        logger.info("Resetting calibration to factory defaults...")
-        
-        for i, motor_id in enumerate(self.motor_ids):
-            logger.info(f"  Resetting motor {motor_id} ({i+1}/{len(self.motor_ids)})...")
-            
-            # Read current homing offset before reset
-            current_offset = self.read_homing_offset(motor_id)
-            if current_offset is not None:
-                logger.debug(f"    Current homing offset: {current_offset}")
-            
-            # Reset Homing_Offset to 0 with retries
-            success = False
-            for attempt in range(3):
-                if attempt > 0:
-                    time.sleep(0.5)  # Wait before retry
-                    
-                result, error = self.packet_handler.write2ByteTxRx(
-                    self.port_handler, motor_id, self.HOMING_OFFSET, 0)
-                if result == self.scs.COMM_SUCCESS:
-                    success = True
-                    break
-                else:
-                    if attempt < 2:
-                        logger.warning(f"Failed to reset homing offset on motor {motor_id} (attempt {attempt+1}/3), retrying...")
-                    else:
-                        logger.error(f"Failed to reset homing offset on motor {motor_id} after 3 attempts")
-            
-            # Verify the reset
-            if success:
-                time.sleep(0.1)
-                verify_offset = self.read_homing_offset(motor_id)
-                if verify_offset == 0:
-                    logger.debug(f"    ✓ Homing offset reset to 0")
-                else:
-                    logger.warning(f"    ⚠ Homing offset reads as {verify_offset} after reset")
-            
-            # Reset Min_Position_Limit to 0 with retries
-            for attempt in range(3):
-                if attempt > 0:
-                    time.sleep(0.3)
-                    
-                result, error = self.packet_handler.write2ByteTxRx(
-                    self.port_handler, motor_id, self.MIN_POSITION_LIMIT, 0)
-                if result == self.scs.COMM_SUCCESS:
-                    break
-                else:
-                    if attempt < 2:
-                        logger.debug(f"Failed to reset min position limit on motor {motor_id} (attempt {attempt+1}/3)")
-                    else:
-                        logger.warning(f"Failed to reset min position limit on motor {motor_id} after 3 attempts")
-                
-            # Reset Max_Position_Limit to max resolution - 1 with retries
-            max_position = self.resolution - 1
-            for attempt in range(3):
-                if attempt > 0:
-                    time.sleep(0.3)
-                    
-                result, error = self.packet_handler.write2ByteTxRx(
-                    self.port_handler, motor_id, self.MAX_POSITION_LIMIT, max_position)
-                if result == self.scs.COMM_SUCCESS:
-                    break
-                else:
-                    if attempt < 2:
-                        logger.debug(f"Failed to reset max position limit on motor {motor_id} (attempt {attempt+1}/3)")
-                    else:
-                        logger.warning(f"Failed to reset max position limit on motor {motor_id} after 3 attempts")
-                
-            # Add delay between motors to prevent bus overload
-            if success:
-                time.sleep(0.3)  # Shorter delay if successful
-            else:
-                time.sleep(0.8)  # Longer delay if there were failures
-        
-        logger.info("Calibration reset complete.")
     
-    def read_homing_offset(self, motor_id: int) -> int | None:
-        """Read the current homing offset from a motor."""
-        try:
-            read_result = self.packet_handler.read2ByteTxRx(
-                self.port_handler, motor_id, self.HOMING_OFFSET)
-            
-            # Handle different return formats
-            if len(read_result) >= 3:
-                offset, result, error = read_result
-            elif len(read_result) == 2:
-                offset, result = read_result
-                error = 0
-            else:
-                logger.debug(f"Unexpected read result format from motor {motor_id}: {read_result}")
-                return None
-            
-            if result == self.scs.COMM_SUCCESS:
-                # Decode sign-magnitude if needed
-                if offset & (1 << 11):  # Check sign bit
-                    offset = -(offset & 0x7FF)  # Clear sign bit and negate
-                return offset
-            else:
-                return None
-        except Exception as e:
-            logger.debug(f"Error reading homing offset from motor {motor_id}: {e}")
-            return None
-            
-    def write_homing_offsets(self, offsets: Dict[int, int]) -> None:
-        """Write homing offsets to all motors."""
-        logger.info(f"Writing homing offsets to {len(offsets)} motors (with delays for bus stability)...")
-        
-        # Clear any pending data in the port
-        if hasattr(self.port_handler, 'flush'):
-            self.port_handler.flush()
-        
-        # Try writing with retries
-        for i, (motor_id, offset) in enumerate(offsets.items()):
-            original_offset = offset
-            # Convert negative offsets for sign-magnitude encoding
-            if offset < 0:
-                encoded_offset = abs(offset) | (1 << 11)  # Set sign bit (bit 11)
-            else:
-                encoded_offset = offset
-            
-            logger.debug(f"Motor {motor_id}: original={original_offset}, encoded={encoded_offset}")
-            
-            # Try up to 3 times for each motor
-            success = False
-            for attempt in range(3):
-                # Add delay before retry attempts
-                if attempt > 0:
-                    time.sleep(1.0)  # Wait 1 second before retrying
-                
-                try:
-                    result, error = self.packet_handler.write2ByteTxRx(
-                        self.port_handler, motor_id, self.HOMING_OFFSET, encoded_offset)
-                    if result == self.scs.COMM_SUCCESS:
-                        logger.info(f"  ✓ Motor {motor_id}: wrote offset {original_offset} (encoded: {encoded_offset}) ({i+1}/{len(offsets)})")
-                        success = True
-                        break
-                    else:
-                        if attempt < 2:
-                            logger.warning(f"Failed to write offset to motor {motor_id} (attempt {attempt+1}/3): {self.packet_handler.getTxRxResult(result)}")
-                        else:
-                            logger.error(f"Failed to write homing offset to motor {motor_id} after 3 attempts: {self.packet_handler.getTxRxResult(result)}")
-                except Exception as e:
-                    if attempt < 2:
-                        logger.warning(f"Exception writing to motor {motor_id} (attempt {attempt+1}/3): {e}")
-                    else:
-                        logger.error(f"Failed to write homing offset to motor {motor_id} after 3 attempts: {e}")
-            
-            # Verify the offset was written correctly
-            if success:
-                time.sleep(0.2)  # Small delay before reading back
-                read_offset = self.read_homing_offset(motor_id)
-                if read_offset is not None and read_offset == original_offset:
-                    logger.debug(f"    Verified: offset {read_offset} matches")
-                elif read_offset is not None:
-                    logger.warning(f"    Warning: read offset {read_offset} doesn't match written {original_offset}")
-                else:
-                    logger.warning(f"    Warning: couldn't verify offset")
-            
-            # Always add delay between motors, even longer if write failed
-            if success:
-                time.sleep(0.8)  # Increased from 0.5s
-            else:
-                time.sleep(1.5)  # Extra delay after failure
-                
-    def set_phase(self, phase_value: int = 76) -> None:
-        """Set Phase for Feetech motors.
-        
-        Args:
-            phase_value: Phase value to set (default: 76)
+    def disable_torque(self) -> None:
+        """Disable torque on all motors. Follows LeRobot's disable_torque logic."""
+        for motor_id in self.motor_ids:
+            self.write("Torque_Enable", motor_id, 0)
+            self.write("Lock", motor_id, 0)
+    
+    def reset_calibration(self, motors: Optional[List[int]] = None) -> None:
         """
-        logger.info(f"Setting Phase={phase_value} for all motors...")
-        for motor_id in self.motor_ids:
-            # Set Phase (Setting byte) to specified value
-            result, error = self.packet_handler.write1ByteTxRx(
-                self.port_handler, motor_id, self.PHASE, phase_value)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to set Phase on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
-            
-            # Add delay to prevent bus bandwidth issues
-            time.sleep(0.1)  # Shorter delay since these are single-byte writes
-                
-    def set_operating_mode(self) -> None:
-        """Set operating mode for Feetech motors."""
-        for motor_id in self.motor_ids:
-            # Set to position mode (0)
-            result, error = self.packet_handler.write1ByteTxRx(
-                self.port_handler, motor_id, self.OPERATING_MODE, 0)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to set operating mode on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
-            
-            # Add delay to prevent bus bandwidth issues
-            time.sleep(0.1)  # Shorter delay since these are single-byte writes
-                
-    def calculate_homing_offsets(self, positions: Dict[int, int]) -> Dict[int, int]:
-        """Calculate homing offsets for Feetech motors.
+        Reset calibration to factory defaults.
+        This follows LeRobot's MotorsBus.reset_calibration() exactly.
+        """
+        if motors is None:
+            motors = self.motor_ids
         
-        Formula from LeRobot:
+        logger.info("Resetting calibration...")
+        
+        for motor_id in motors:
+            max_res = self.resolution - 1
+            self.write("Homing_Offset", motor_id, 0)
+            self.write("Min_Position_Limit", motor_id, 0)
+            self.write("Max_Position_Limit", motor_id, max_res)
+    
+    def _get_half_turn_homings(self, positions: Dict[int, int]) -> Dict[int, int]:
+        """
+        Calculate homing offsets. This follows LeRobot's Feetech-specific implementation.
+        
         On Feetech Motors: Present_Position = Actual_Position - Homing_Offset
-        
-        To make the motor read 2048 (middle) at its current physical position:
-        - We want: Present_Position = 2048
-        - We have: Actual_Position = current reading
-        - Therefore: 2048 = Actual_Position - Homing_Offset
-        - So: Homing_Offset = Actual_Position - 2048
+        To make position read as half of resolution (e.g., 2048):
+        Homing_Offset = Actual_Position - (resolution / 2)
         """
-        offsets = {}
-        middle_position = int(self.resolution / 2)  # 2048 for 4096 resolution
+        half_turn_homings = {}
+        max_res = self.resolution - 1
         
-        logger.info(f"\nCalculating offsets to make motors read {middle_position}:")
-        for motor_id, current_pos in positions.items():
-            offset = current_pos - middle_position
-            offsets[motor_id] = offset
-            logger.info(f"  Motor {motor_id}: current={current_pos} → offset={offset} → will read {middle_position}")
-            
-        return offsets
-
-    def read_motor_diagnostics(self) -> None:
-        """Read and display diagnostic information from all motors."""
-        logger.info("\nMotor Diagnostics:")
-        logger.info("="*60)
+        for motor_id, pos in positions.items():
+            half_turn_homings[motor_id] = pos - int(max_res / 2)
         
-        for motor_id in self.motor_ids:
-            logger.info(f"\nMotor {motor_id}:")
-            
-            # Read Phase
-            try:
-                read_result = self.packet_handler.read1ByteTxRx(
-                    self.port_handler, motor_id, self.PHASE)
-                if len(read_result) >= 3:
-                    phase, result, error = read_result
-                elif len(read_result) == 2:
-                    phase, result = read_result
-                    error = 0
-                else:
-                    phase = None
-                    
-                if phase is not None and result == self.scs.COMM_SUCCESS:
-                    logger.info(f"  Phase (Setting byte): {phase}")
-                else:
-                    logger.warning(f"  Phase: Failed to read")
-            except Exception as e:
-                logger.warning(f"  Phase: Error - {e}")
-            
-            # Read Lock
-            try:
-                read_result = self.packet_handler.read1ByteTxRx(
-                    self.port_handler, motor_id, self.LOCK)
-                if len(read_result) >= 3:
-                    lock, result, error = read_result
-                elif len(read_result) == 2:
-                    lock, result = read_result
-                    error = 0
-                else:
-                    lock = None
-                    
-                if lock is not None and result == self.scs.COMM_SUCCESS:
-                    logger.info(f"  Lock: {lock}")
-                else:
-                    logger.warning(f"  Lock: Failed to read")
-            except Exception as e:
-                logger.warning(f"  Lock: Error - {e}")
-            
-            # Read Operating Mode
-            try:
-                read_result = self.packet_handler.read1ByteTxRx(
-                    self.port_handler, motor_id, self.OPERATING_MODE)
-                if len(read_result) >= 3:
-                    mode, result, error = read_result
-                elif len(read_result) == 2:
-                    mode, result = read_result
-                    error = 0
-                else:
-                    mode = None
-                    
-                if mode is not None and result == self.scs.COMM_SUCCESS:
-                    mode_str = {0: "Position", 1: "Velocity", 2: "PWM", 3: "Step"}.get(mode, f"Unknown({mode})")
-                    logger.info(f"  Operating Mode: {mode_str}")
-                else:
-                    logger.warning(f"  Operating Mode: Failed to read")
-            except Exception as e:
-                logger.warning(f"  Operating Mode: Error - {e}")
-            
-            # Read Homing Offset
-            offset = self.read_homing_offset(motor_id)
-            if offset is not None:
-                logger.info(f"  Homing Offset: {offset}")
-            else:
-                logger.warning(f"  Homing Offset: Failed to read")
-            
-            # Read Present Position
-            try:
-                positions = self.read_positions()
-                if motor_id in positions:
-                    logger.info(f"  Present Position: {positions[motor_id]}")
-                else:
-                    logger.warning(f"  Present Position: Failed to read")
-            except Exception as e:
-                logger.warning(f"  Present Position: Error - {e}")
-            
-            # Read Position Limits
-            try:
-                # Min limit
-                read_result = self.packet_handler.read2ByteTxRx(
-                    self.port_handler, motor_id, self.MIN_POSITION_LIMIT)
-                if len(read_result) >= 3:
-                    min_limit, result, error = read_result
-                elif len(read_result) == 2:
-                    min_limit, result = read_result
-                    error = 0
-                else:
-                    min_limit = None
-                    
-                # Max limit
-                read_result = self.packet_handler.read2ByteTxRx(
-                    self.port_handler, motor_id, self.MAX_POSITION_LIMIT)
-                if len(read_result) >= 3:
-                    max_limit, result, error = read_result
-                elif len(read_result) == 2:
-                    max_limit, result = read_result
-                    error = 0
-                else:
-                    max_limit = None
-                    
-                if min_limit is not None and max_limit is not None:
-                    logger.info(f"  Position Limits: {min_limit} - {max_limit}")
-                else:
-                    logger.warning(f"  Position Limits: Failed to read")
-            except Exception as e:
-                logger.warning(f"  Position Limits: Error - {e}")
-        
-        logger.info("="*60)
-
-
-def set_middle_position(controller: FeetechController) -> int:
-    """Set servos to their middle position by configuring homing offsets.
+        return half_turn_homings
     
-    Returns:
-        int: The phase value that was set (76 for all robots)
+    def set_half_turn_homings(self) -> Dict[int, int]:
+        """
+        Set half-turn homings. This follows LeRobot's MotorsBus.set_half_turn_homings() exactly.
+        """
+        # Step 1: Reset calibration
+        self.reset_calibration()
+        
+        # Step 2: Read current positions
+        actual_positions = self.sync_read("Present_Position")
+        
+        # Step 3: Calculate homing offsets
+        homing_offsets = self._get_half_turn_homings(actual_positions)
+        
+        # Step 4: Write homing offsets
+        for motor_id, offset in homing_offsets.items():
+            self.write("Homing_Offset", motor_id, offset)
+        
+        return homing_offsets
+
+
+def set_middle_position(bus: FeetechBus) -> None:
     """
-    logger.info(f"Setting middle position for {len(controller.motor_ids)} motors")
-    
-    # Show initial diagnostics
-    controller.read_motor_diagnostics()
+    Set servos to their middle position by configuring homing offsets.
+    This follows the exact logic from LeRobot's set_middle_position.py.
+    """
+    logger.info(f"\nSetting middle position for motors: {bus.motor_ids}")
     
     # Disable torque to allow manual positioning
-    controller.disable_torque()
+    bus.disable_torque()
     
-    # Set Phase to 76 and Lock to 0 for all servos (from LeRobot's set_middle_position)
-    phase_value = 76  # Always use 76 as in the original LeRobot script
-    logger.info(f"Setting Phase={phase_value} and Lock=0 for all servos...")
-    controller.set_phase(phase_value)
+    # Set Phase to 76 and Lock to 0 for all servos
+    logger.info("Setting Phase to 76 and Lock to 0 for all servos...")
+    for motor_id in bus.motor_ids:
+        bus.write("Phase", motor_id, 76)
+        bus.write("Lock", motor_id, 0)
+        logger.debug(f"Set Phase=76 and Lock=0 for motor: {motor_id}")
     
-    # Set operating mode to position mode
-    controller.set_operating_mode()
+    # Set operating mode to position mode (0)
+    for motor_id in bus.motor_ids:
+        bus.write("Operating_Mode", motor_id, 0)  # Position mode
     
     input("\nMove the device to the desired middle position and press ENTER...")
     
-    # Read current positions BEFORE resetting calibration
-    positions = controller.read_positions()
-    if not positions:
-        logger.error("Failed to read positions from any motor")
-        return phase_value
-        
-    logger.info("\nCurrent positions before calibration:")
-    for motor_id, pos in positions.items():
-        logger.info(f"  Motor {motor_id}: {pos}")
+    # Set half-turn homings (this makes current position the middle)
+    logger.info("Setting homing offsets...")
+    homing_offsets = bus.set_half_turn_homings()
     
-    # Reset calibration to factory defaults (CRITICAL STEP from LeRobot)
-    controller.reset_calibration()
-    time.sleep(0.5)  # Let the reset take effect
+    logger.info("\nHoming offsets set:")
+    for motor_id, offset in homing_offsets.items():
+        logger.info(f"  Motor {motor_id}: {offset}")
     
-    # Calculate homing offsets using LeRobot's formula for Feetech
-    offsets = controller.calculate_homing_offsets(positions)
-    
-    # Add delay before writing to allow bus to stabilize
-    logger.info("\nWaiting for bus to stabilize...")
-    time.sleep(1.0)
-    
-    # Make sure torque is still disabled before writing offsets
-    logger.info("Ensuring torque is disabled before writing offsets...")
-    controller.disable_torque()
-    time.sleep(0.5)
-    
-    # Write homing offsets
-    controller.write_homing_offsets(offsets)
-    
-    # Wait a bit for the offsets to take effect
-    logger.info("\nWaiting for offsets to take effect...")
-    time.sleep(2.0)  # Increased wait time
-    
-    # Show final diagnostics
-    logger.info("\nFinal motor state:")
-    controller.read_motor_diagnostics()
-    
-    # Read positions again to verify they are now at 2048
-    verify_positions = controller.read_positions()
-    all_correct = True
-    logger.info("\nVerification results:")
-    for motor_id in controller.motor_ids:
-        current_pos = verify_positions.get(motor_id, -1)
-        expected_pos = int(controller.resolution / 2)  # Should be 2048
-        
-        if current_pos == -1:
-            logger.error(f"  Motor {motor_id}: Failed to read position")
-            all_correct = False
-        elif abs(current_pos - expected_pos) <= 10:  # Allow small tolerance
-            logger.info(f"  ✓ Motor {motor_id}: {current_pos} (expected ~{expected_pos})")
-        else:
-            logger.warning(f"  ⚠ Motor {motor_id}: {current_pos} (expected {expected_pos})")
-            logger.warning(f"    Note: This is normal - Feetech motors may need a power cycle")
-            # Don't mark as incorrect - this is expected behavior
-    
-    logger.info("\n✓ Middle position calibration complete!")
-    logger.info("The homing offsets have been written to motor memory.")
-    logger.info(f"Phase (Setting byte) has been set to {phase_value} and Lock to 0 for all servos.")
-    logger.info("\nIMPORTANT: For Feetech motors, the new calibration will take effect after:")
-    logger.info("  1. Power cycling the motors (turn off and on)")
-    logger.info("  2. The motors will then read ~2048 at their current physical position")
-    logger.info("\nYou can verify this by:")
-    logger.info("  1. Power cycling the robot")
-    logger.info("  2. Running: python monitor_positions_standalone.py")
-    
-    return phase_value
-
-
-def process_single_robot(port: str, motor_ids: List[int], motor_model: str, baudrate: int) -> bool:
-    """Process a single robot by setting middle position."""
-    controller = None
-    try:
-        controller = FeetechController(port, motor_ids, baudrate, motor_model)
-        controller.connect()
-        set_middle_position(controller)
-        return True
-    except Exception as e:
-        logger.error(f"Error processing robot: {e}")
-        return False
-    finally:
-        if controller:
-            try:
-                controller.disconnect()
-                logger.info("Disconnected from device.")
-            except:
-                pass
+    logger.info("\n✓ Middle position set successfully!")
+    logger.info("The current position is now the middle point for all servos.")
+    logger.info("Phase (Setting byte) has been set to 76 and Lock to 0 for all servos.")
 
 
 def main():
@@ -720,88 +336,42 @@ def main():
                        help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6)")
     parser.add_argument("--port", type=str,
                        help="Serial port (e.g., /dev/ttyUSB0, COM3)")
-    parser.add_argument("--auto_detect_port", action="store_true",
-                       help="Auto-detect the serial port (deprecated, now default behavior)")
     parser.add_argument("--motor_model", type=str, default="sts3215",
                        help="Motor model (default: sts3215)")
     parser.add_argument("--baudrate", type=int, default=1000000,
                        help="Baudrate (default: 1000000)")
-    parser.add_argument("--continuous", action="store_true",
-                       help="Continuous mode for processing multiple robots")
-    parser.add_argument("--single", action="store_true",
-                       help="Process one robot and exit")
     
     args = parser.parse_args()
     
     # Parse motor IDs
     motor_ids = [int(id.strip()) for id in args.motor_ids.split(",")]
     
-    # Determine port (auto-detect by default if no port specified)
+    # Determine port
     if args.port:
         port = args.port
     else:
-        # Auto-detect port by default
         try:
             port = auto_detect_port()
-            logger.info(f"Auto-detected port: {port}")
         except RuntimeError as e:
             logger.error(str(e))
             return
     
-    if args.single or not args.continuous:
-        # Single robot mode
-        logger.info("Single robot mode - will process one robot and exit")
-        logger.info(f"Motor IDs: {motor_ids}")
-        logger.info(f"Port: {port}")
-        logger.info(f"Motor model: {args.motor_model}")
+    # Create bus instance
+    bus = FeetechBus(port, motor_ids, args.baudrate, args.motor_model)
+    
+    try:
+        # Connect to motors
+        bus.connect()
         
-        if process_single_robot(port, motor_ids, args.motor_model, args.baudrate):
-            logger.info("\n✅ Successfully processed 1 robot")
-        else:
-            logger.error("\n❌ Failed to process robot")
-    else:
-        # Continuous mode for multiple robots
-        logger.info("🔄 Continuous mode - Press SPACE to process next robot, 'q' to quit")
-        logger.info(f"Motor IDs: {motor_ids}")
-        logger.info(f"Motor model: {args.motor_model}")
+        # Set middle position
+        set_middle_position(bus)
         
-        robot_count = 0
-        
-        try:
-            while True:
-                print(f"\n{'='*60}")
-                print(f"Robots processed: {robot_count}")
-                print("1. Connect a new robot via USB")
-                print("2. Press SPACE when ready (or 'q' to quit)")
-                print(f"{'='*60}")
-                
-                if not wait_for_keypress():
-                    break
-                
-                print("\n🔍 Detecting robot...")
-                
-                # Auto-detect port for each robot
-                try:
-                    current_port = auto_detect_port()
-                except RuntimeError as e:
-                    logger.error(str(e))
-                    continue
-                
-                if process_single_robot(current_port, motor_ids, args.motor_model, args.baudrate):
-                    robot_count += 1
-                    print(f"\n✅ Successfully processed robot #{robot_count}")
-                else:
-                    print("\n❌ Failed to process robot. Try again.")
-                
-                # Brief pause to allow USB disconnection
-                time.sleep(0.5)
-                
-        except KeyboardInterrupt:
-            print("\n\nInterrupted by user")
-        
-        print(f"\n{'='*60}")
-        print(f"🎉 Session complete! Total robots processed: {robot_count}")
-        print(f"{'='*60}")
+    except Exception as e:
+        logger.error(f"Error: {e}")
+    finally:
+        # Disconnect
+        if bus:
+            bus.disconnect()
 
 
 if __name__ == "__main__":
