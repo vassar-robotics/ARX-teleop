@@ -193,6 +193,9 @@ class FeetechController:
                 self.port_handler, motor_id, self.LOCK, 0)
             if result != self.scs.COMM_SUCCESS:
                 logger.warning(f"Failed to set lock on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+            
+            # Add delay to prevent bus bandwidth issues
+            time.sleep(0.1)  # Shorter delay since these are single-byte writes
                 
     def read_positions(self) -> Dict[int, int]:
         """Read current positions from all motors."""
@@ -208,15 +211,48 @@ class FeetechController:
         
     def write_homing_offsets(self, offsets: Dict[int, int]) -> None:
         """Write homing offsets to all motors."""
-        for motor_id, offset in offsets.items():
+        logger.info(f"Writing homing offsets to {len(offsets)} motors (with delays for bus stability)...")
+        
+        # Clear any pending data in the port
+        if hasattr(self.port_handler, 'flush'):
+            self.port_handler.flush()
+        
+        # Try writing with retries
+        for i, (motor_id, offset) in enumerate(offsets.items()):
+            original_offset = offset
             # Convert negative offsets for sign-magnitude encoding
             if offset < 0:
                 offset = abs(offset) | (1 << 11)  # Set sign bit (bit 11)
+            
+            # Try up to 3 times for each motor
+            success = False
+            for attempt in range(3):
+                # Ping motor first to ensure it's responding
+                if attempt > 0:  # Only ping on retries
+                    ping_result = self.packet_handler.ping(self.port_handler, motor_id)
+                    if ping_result[1] != self.scs.COMM_SUCCESS:
+                        logger.warning(f"Motor {motor_id} not responding to ping")
+                        time.sleep(0.5)
+                        continue
                 
-            result, error = self.packet_handler.write2ByteTxRx(
-                self.port_handler, motor_id, self.HOMING_OFFSET, offset)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to write homing offset to motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+                result, error = self.packet_handler.write2ByteTxRx(
+                    self.port_handler, motor_id, self.HOMING_OFFSET, offset)
+                if result == self.scs.COMM_SUCCESS:
+                    logger.info(f"  ✓ Motor {motor_id}: offset {original_offset} ({i+1}/{len(offsets)})")
+                    success = True
+                    break
+                else:
+                    if attempt < 2:
+                        logger.warning(f"Failed to write offset to motor {motor_id} (attempt {attempt+1}/3), retrying...")
+                        time.sleep(0.5)
+                    else:
+                        logger.error(f"Failed to write homing offset to motor {motor_id} after 3 attempts: {self.packet_handler.getTxRxResult(result)}")
+            
+            # Always add delay between motors, even longer if write failed
+            if success:
+                time.sleep(0.8)  # Increased from 0.5s
+            else:
+                time.sleep(1.5)  # Extra delay after failure
                 
     def set_phase_and_lock(self) -> None:
         """Set Phase=76 and Lock=0 for Feetech motors."""
@@ -233,6 +269,9 @@ class FeetechController:
                 self.port_handler, motor_id, self.LOCK, 0)
             if result != self.scs.COMM_SUCCESS:
                 logger.warning(f"Failed to set Lock on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+            
+            # Add delay to prevent bus bandwidth issues
+            time.sleep(0.1)  # Shorter delay since these are single-byte writes
                 
     def set_operating_mode(self) -> None:
         """Set operating mode for Feetech motors."""
@@ -242,6 +281,9 @@ class FeetechController:
                 self.port_handler, motor_id, self.OPERATING_MODE, 0)
             if result != self.scs.COMM_SUCCESS:
                 logger.warning(f"Failed to set operating mode on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+            
+            # Add delay to prevent bus bandwidth issues
+            time.sleep(0.1)  # Shorter delay since these are single-byte writes
                 
     def calculate_homing_offsets(self, positions: Dict[int, int]) -> Dict[int, int]:
         """Calculate homing offsets for Feetech motors."""
@@ -276,13 +318,17 @@ def set_middle_position(controller: FeetechController) -> None:
     # Calculate homing offsets
     offsets = controller.calculate_homing_offsets(positions)
     
-    # Write homing offsets
-    logger.info("Setting homing offsets...")
-    controller.write_homing_offsets(offsets)
+    # Add delay before writing to allow bus to stabilize
+    logger.info("Waiting for bus to stabilize...")
+    time.sleep(1.0)
     
-    logger.info("\nHoming offsets set:")
-    for motor_id, offset in offsets.items():
-        logger.info(f"  Motor {motor_id}: {offset}")
+    # Make sure torque is still disabled before writing offsets
+    logger.info("Ensuring torque is disabled before writing offsets...")
+    controller.disable_torque()
+    time.sleep(0.5)
+    
+    # Write homing offsets
+    controller.write_homing_offsets(offsets)
     
     logger.info("\n✓ Middle position set successfully!")
     logger.info("The current position is now the middle point for all servos.")
