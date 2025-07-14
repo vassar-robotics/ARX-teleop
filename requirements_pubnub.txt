@@ -1,6 +1,5 @@
-# Requirements for PubNub-based teleoperation
-pubnub>=10.4.1
+# PubNub teleoperation requirements
+pubnub>=7.0.0
+colorama>=0.4.6
 pyserial>=3.5
-scservo_sdk  # Install from Feetech SDK
-msgpack>=1.0.0  # For efficient data serialization
-colorama>=0.4.6  # For colored terminal output 
+scservo_sdk  # Install from Feetech SDK 

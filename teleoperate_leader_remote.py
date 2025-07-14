@@ -3,7 +3,7 @@
 Leader-side teleoperation script using PubNub for internet communication.
 
 This script:
-1. Connects to 2 leader robots (5V) via USB
+1. Connects to 2 leader robots (<9V) via USB
 2. Reads their positions at high frequency
 3. Publishes position data to PubNub for follower robots
 
@@ -15,11 +15,11 @@ import argparse
 import json
 import logging
 import platform
+import signal
 import sys
 import time
 import threading
 from typing import Dict, List, Optional
-import msgpack
 
 try:
     from pubnub.pnconfiguration import PNConfiguration
@@ -48,6 +48,16 @@ from teleoperate_multi_arms_standalone import SO101Controller, find_robot_ports,
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+
+def signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) for graceful shutdown."""
+    global shutdown_requested
+    logger.info("\n\n⚠️  Shutdown requested. Cleaning up...")
+    shutdown_requested = True
 
 
 class NetworkMonitor:
@@ -196,19 +206,21 @@ class LeaderTeleop:
         """Publish position data to PubNub."""
         self.sequence += 1
         
+        # Convert motor IDs to strings for JSON serialization
+        json_positions = {}
+        for robot_id, robot_positions in positions.items():
+            json_positions[robot_id] = {str(motor_id): int(pos) for motor_id, pos in robot_positions.items()}
+        
         message = {
             "type": "telemetry",
             "timestamp": time.time(),
             "sequence": self.sequence,
-            "positions": positions
+            "positions": json_positions
         }
-        
-        # Use msgpack for efficient serialization
-        packed = msgpack.packb(message)
         
         try:
             # Publish to telemetry channel
-            self.pubnub.publish().channel(pubnub_config.TELEMETRY_CHANNEL).message(packed).sync()
+            self.pubnub.publish().channel(pubnub_config.TELEMETRY_CHANNEL).message(message).sync()
             self.monitor.message_sent(self.sequence)
             
             # Track publish rate
@@ -269,7 +281,7 @@ class LeaderTeleop:
         logger.info(f"Starting teleoperation at {pubnub_config.TARGET_FPS} Hz...")
         
         try:
-            while self.running:
+            while self.running and not shutdown_requested:
                 loop_start = time.time()
                 
                 # Read positions from all leaders
@@ -295,7 +307,7 @@ class LeaderTeleop:
             
     def display_loop(self):
         """Separate thread for updating display."""
-        while self.running:
+        while self.running and not shutdown_requested:
             self.display_status()
             time.sleep(0.5)  # Update display at 2Hz
             
@@ -318,18 +330,22 @@ class LeaderTeleop:
             self.pubnub.unsubscribe_all()
             
         # Disconnect robots
+        logger.info("Disconnecting robots...")
         for leader in self.leaders:
             try:
                 leader.disconnect()
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to disconnect {leader.robot_id}: {e}")
                 
         logger.info("Shutdown complete")
 
 
 def main():
+    # Register signal handler for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    
     parser = argparse.ArgumentParser(description="Leader-side teleoperation via PubNub")
-    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7",
+    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6",
                        help="Comma-separated motor IDs")
     parser.add_argument("--baudrate", type=int, default=1000000,
                        help="Serial baudrate")

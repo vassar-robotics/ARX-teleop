@@ -3,7 +3,7 @@
 Follower-side teleoperation script using PubNub for internet communication.
 
 This script:
-1. Connects to 2 follower robots (12V) via USB
+1. Connects to 2 follower robots (>=9V) via USB
 2. Subscribes to position data from PubNub
 3. Applies received positions to follower robots with safety checks
 
@@ -15,11 +15,11 @@ import argparse
 import json
 import logging
 import platform
+import signal
 import sys
 import time
 import threading
 from typing import Dict, List, Optional
-import msgpack
 
 try:
     from pubnub.pnconfiguration import PNConfiguration
@@ -48,6 +48,16 @@ from teleoperate_multi_arms_standalone import SO101Controller, find_robot_ports,
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+
+def signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) for graceful shutdown."""
+    global shutdown_requested
+    logger.info("\n\n⚠️  Shutdown requested. Cleaning up...")
+    shutdown_requested = True
 
 
 class PositionSmoother:
@@ -99,11 +109,8 @@ class TelemetryListener(SubscribeCallback):
     def message(self, pubnub, message):
         """Handle incoming telemetry messages."""
         try:
-            # Unpack msgpack data
-            if isinstance(message.message, bytes):
-                data = msgpack.unpackb(message.message)
-            else:
-                data = message.message
+            # Get the message data
+            data = message.message
                 
             if isinstance(data, dict) and data.get("type") == "telemetry":
                 self.latest_data = data
@@ -176,7 +183,7 @@ class FollowerTeleop:
         for port in ports:
             try:
                 is_leader, voltage = identify_robot_by_voltage(port, self.motor_ids)
-                if not is_leader:  # Followers have 12V
+                if not is_leader:  # Followers have >=9V
                     follower_ports.append(port)
                     logger.info(f"{Fore.GREEN}✓ Follower robot found at {port} ({voltage:.1f}V){Style.RESET_ALL}")
             except Exception as e:
@@ -267,7 +274,9 @@ class FollowerTeleop:
             smoother = self.smoothers[follower_id]
             smoothed_positions = {}
             
-            for motor_id, position in leader_positions.items():
+            for motor_id_str, position in leader_positions.items():
+                # Convert string motor ID back to int
+                motor_id = int(motor_id_str)
                 smoothed_positions[motor_id] = smoother.smooth(motor_id, position)
                 
             follower.write_positions(smoothed_positions)
@@ -335,7 +344,7 @@ class FollowerTeleop:
         logger.info("Starting follower teleoperation...")
         
         try:
-            while self.running:
+            while self.running and not shutdown_requested:
                 # Check for new telemetry data
                 if self.telemetry_listener.latest_data:
                     # Process the latest data
@@ -362,13 +371,13 @@ class FollowerTeleop:
             
     def display_loop(self):
         """Separate thread for updating display."""
-        while self.running:
+        while self.running and not shutdown_requested:
             self.display_status()
             time.sleep(0.5)  # Update display at 2Hz
             
     def status_loop(self):
         """Send periodic status updates."""
-        while self.running:
+        while self.running and not shutdown_requested:
             self.send_status()
             time.sleep(2)  # Send status every 2 seconds
             
@@ -380,19 +389,31 @@ class FollowerTeleop:
         if self.pubnub:
             self.pubnub.unsubscribe_all()
             
-        # Disconnect robots
+        # Disable torque and disconnect robots
+        logger.info("Disabling torque on all follower robots...")
+        for follower in self.followers:
+            try:
+                if follower.connected:
+                    follower.disable_torque()
+            except Exception as e:
+                logger.warning(f"Failed to disable torque on {follower.robot_id}: {e}")
+                
+        logger.info("Disconnecting robots...")
         for follower in self.followers:
             try:
                 follower.disconnect()
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to disconnect {follower.robot_id}: {e}")
                 
         logger.info("Shutdown complete")
 
 
 def main():
+    # Register signal handler for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    
     parser = argparse.ArgumentParser(description="Follower-side teleoperation via PubNub")
-    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7",
+    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6",
                        help="Comma-separated motor IDs")
     parser.add_argument("--baudrate", type=int, default=1000000,
                        help="Serial baudrate")
