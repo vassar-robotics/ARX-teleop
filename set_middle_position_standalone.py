@@ -125,6 +125,7 @@ class FeetechController:
     OPERATING_MODE = 33
     PHASE = 18
     LOCK = 55
+    PRESENT_VOLTAGE = 62
     
     def __init__(self, port: str, motor_ids: List[int], baudrate: int = 1000000, 
                  motor_model: str = "sts3215"):
@@ -190,6 +191,18 @@ class FeetechController:
         if self.port_handler:
             self.port_handler.closePort()
         self.connected = False
+        
+    def read_voltage(self) -> float:
+        """Read voltage from the first motor."""
+        motor_id = self.motor_ids[0]
+        raw_voltage, result, error = self.packet_handler.read1ByteTxRx(
+            self.port_handler, motor_id, self.PRESENT_VOLTAGE)
+        
+        if result != self.scs.COMM_SUCCESS:
+            raise RuntimeError(f"Failed to read voltage: {self.packet_handler.getTxRxResult(result)}")
+            
+        # Feetech motors report voltage in units of 0.1V
+        return raw_voltage / 10.0
         
     def disable_torque(self) -> None:
         """Disable torque on all motors."""
@@ -271,13 +284,17 @@ class FeetechController:
             else:
                 time.sleep(1.5)  # Extra delay after failure
                 
-    def set_phase_and_lock(self) -> None:
-        """Set Phase=76 and Lock=0 for Feetech motors."""
-        logger.info("Setting Phase=76 and Lock=0 for all motors...")
+    def set_phase_and_lock(self, phase_value: int = 76) -> None:
+        """Set Phase and Lock=0 for Feetech motors.
+        
+        Args:
+            phase_value: Phase value to set (default: 76)
+        """
+        logger.info(f"Setting Phase={phase_value} and Lock=0 for all motors...")
         for motor_id in self.motor_ids:
-            # Set Phase (Setting byte) to 76
+            # Set Phase (Setting byte) to specified value
             result, error = self.packet_handler.write1ByteTxRx(
-                self.port_handler, motor_id, self.PHASE, 76)
+                self.port_handler, motor_id, self.PHASE, phase_value)
             if result != self.scs.COMM_SUCCESS:
                 logger.warning(f"Failed to set Phase on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
                 
@@ -311,15 +328,33 @@ class FeetechController:
         return offsets
 
 
-def set_middle_position(controller: FeetechController) -> None:
-    """Set servos to their middle position by configuring homing offsets."""
+def set_middle_position(controller: FeetechController) -> int:
+    """Set servos to their middle position by configuring homing offsets.
+    
+    Returns:
+        int: The phase value that was set (76 for leader, 12 for follower)
+    """
     logger.info(f"Setting middle position for {len(controller.motor_ids)} motors")
+    
+    # Detect voltage to determine if leader (5V) or follower (12V)
+    try:
+        voltage = controller.read_voltage()
+        is_leader = 4.5 <= voltage <= 5.5  # Leader is ~5V
+        robot_type = "LEADER" if is_leader else "FOLLOWER"
+        phase_value = 76 if is_leader else 12
+        
+        logger.info(f"Detected {robot_type} robot (voltage: {voltage:.1f}V)")
+        logger.info(f"Will set Phase={phase_value} for {robot_type} robot")
+    except Exception as e:
+        logger.warning(f"Failed to detect voltage: {e}")
+        logger.warning("Defaulting to Phase=76")
+        phase_value = 76
     
     # Disable torque to allow manual positioning
     controller.disable_torque()
     
-    # Set Phase=76 and Lock=0
-    controller.set_phase_and_lock()
+    # Set Phase and Lock=0 based on robot type
+    controller.set_phase_and_lock(phase_value)
     
     # Set operating mode
     controller.set_operating_mode()
@@ -330,7 +365,7 @@ def set_middle_position(controller: FeetechController) -> None:
     positions = controller.read_positions()
     if not positions:
         logger.error("Failed to read positions from any motor")
-        return
+        return phase_value  # Return the phase value even on error
         
     # Calculate homing offsets
     offsets = controller.calculate_homing_offsets(positions)
@@ -355,7 +390,9 @@ def set_middle_position(controller: FeetechController) -> None:
     
     logger.info("\n✓ Middle position set successfully!")
     logger.info("The current position is now the middle point for all servos.")
-    logger.info("Phase (Setting byte) has been set to 76 and Lock to 0 for all servos.")
+    logger.info(f"Phase (Setting byte) has been set to {phase_value} and Lock to 0 for all servos.")
+    
+    return phase_value
 
 
 def process_single_robot(port: str, motor_ids: List[int], motor_model: str, baudrate: int) -> bool:
