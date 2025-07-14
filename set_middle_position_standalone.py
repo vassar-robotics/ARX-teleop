@@ -245,27 +245,65 @@ class FeetechController:
         3. The motor has a clean state before applying new calibration
         """
         logger.info("Resetting calibration to factory defaults...")
-        for motor_id in self.motor_ids:
-            # Set Homing_Offset to 0
-            result, error = self.packet_handler.write2ByteTxRx(
-                self.port_handler, motor_id, self.HOMING_OFFSET, 0)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to reset homing offset on motor {motor_id}")
+        
+        for i, motor_id in enumerate(self.motor_ids):
+            logger.info(f"  Resetting motor {motor_id} ({i+1}/{len(self.motor_ids)})...")
             
-            # Set Min_Position_Limit to 0
-            result, error = self.packet_handler.write2ByteTxRx(
-                self.port_handler, motor_id, self.MIN_POSITION_LIMIT, 0)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to reset min position limit on motor {motor_id}")
+            # Reset Homing_Offset to 0 with retries
+            success = False
+            for attempt in range(3):
+                if attempt > 0:
+                    time.sleep(0.5)  # Wait before retry
+                    
+                result, error = self.packet_handler.write2ByteTxRx(
+                    self.port_handler, motor_id, self.HOMING_OFFSET, 0)
+                if result == self.scs.COMM_SUCCESS:
+                    success = True
+                    break
+                else:
+                    if attempt < 2:
+                        logger.warning(f"Failed to reset homing offset on motor {motor_id} (attempt {attempt+1}/3), retrying...")
+                    else:
+                        logger.error(f"Failed to reset homing offset on motor {motor_id} after 3 attempts")
+            
+            # Reset Min_Position_Limit to 0 with retries
+            for attempt in range(3):
+                if attempt > 0:
+                    time.sleep(0.3)
+                    
+                result, error = self.packet_handler.write2ByteTxRx(
+                    self.port_handler, motor_id, self.MIN_POSITION_LIMIT, 0)
+                if result == self.scs.COMM_SUCCESS:
+                    break
+                else:
+                    if attempt < 2:
+                        logger.debug(f"Failed to reset min position limit on motor {motor_id} (attempt {attempt+1}/3)")
+                    else:
+                        logger.warning(f"Failed to reset min position limit on motor {motor_id} after 3 attempts")
                 
-            # Set Max_Position_Limit to max resolution - 1
+            # Reset Max_Position_Limit to max resolution - 1 with retries
             max_position = self.resolution - 1
-            result, error = self.packet_handler.write2ByteTxRx(
-                self.port_handler, motor_id, self.MAX_POSITION_LIMIT, max_position)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to reset max position limit on motor {motor_id}")
+            for attempt in range(3):
+                if attempt > 0:
+                    time.sleep(0.3)
+                    
+                result, error = self.packet_handler.write2ByteTxRx(
+                    self.port_handler, motor_id, self.MAX_POSITION_LIMIT, max_position)
+                if result == self.scs.COMM_SUCCESS:
+                    break
+                else:
+                    if attempt < 2:
+                        logger.debug(f"Failed to reset max position limit on motor {motor_id} (attempt {attempt+1}/3)")
+                    else:
+                        logger.warning(f"Failed to reset max position limit on motor {motor_id} after 3 attempts")
                 
-            time.sleep(0.1)  # Small delay between motors
+            # Add delay between motors to prevent bus overload
+            if success:
+                time.sleep(0.3)  # Shorter delay if successful
+            else:
+                time.sleep(0.8)  # Longer delay if there were failures
+        
+        logger.info("Calibration reset complete.")
             
     def write_homing_offsets(self, offsets: Dict[int, int]) -> None:
         """Write homing offsets to all motors."""
