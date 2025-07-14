@@ -101,6 +101,8 @@ class FeetechBus:
     MIN_POSITION_LIMIT = 9
     MAX_POSITION_LIMIT = 11
     PRESENT_POSITION = 56
+    RESPONSE_STATUS_LEVEL = 8
+    RETURN_DELAY_TIME = 7
     
     # Model resolutions
     RESOLUTIONS = {
@@ -187,6 +189,10 @@ class FeetechBus:
             addr, size = self.MIN_POSITION_LIMIT, 2
         elif data_name == "Max_Position_Limit":
             addr, size = self.MAX_POSITION_LIMIT, 2
+        elif data_name == "Return_Delay_Time":
+            addr, size = self.RETURN_DELAY_TIME, 1
+        elif data_name == "Response_Status_Level":
+            addr, size = self.RESPONSE_STATUS_LEVEL, 1
         else:
             raise ValueError(f"Unknown data_name: {data_name}")
         
@@ -242,6 +248,14 @@ class FeetechBus:
             self.write("Torque_Enable", motor_id, 0)
             self.write("Lock", motor_id, 0)
     
+    def configure_motors(self) -> None:
+        """Configure motors for calibration. Follows LeRobot's configure_motors logic."""
+        for motor_id in self.motor_ids:
+            # Set Return_Delay_Time to 0 (minimum 2µs delay)
+            self.write("Return_Delay_Time", motor_id, 0)
+            # Set Response_Status_Level to 2 (return status packet for all commands)
+            self.write("Response_Status_Level", motor_id, 2)
+    
     def reset_calibration(self, motors: Optional[List[int]] = None) -> None:
         """
         Reset calibration to factory defaults.
@@ -288,8 +302,11 @@ class FeetechBus:
         homing_offsets = self._get_half_turn_homings(actual_positions)
         
         # Step 4: Write homing offsets
+        # Note: Feetech motors may not return status packets for EEPROM writes
         for motor_id, offset in homing_offsets.items():
             self.write("Homing_Offset", motor_id, offset)
+            # Add small delay after EEPROM write
+            time.sleep(0.01)
         
         return homing_offsets
 
@@ -319,6 +336,7 @@ def set_middle_position(bus: FeetechBus) -> None:
     
     # Set half-turn homings (this makes current position the middle)
     logger.info("Setting homing offsets...")
+    logger.info("Note: Warnings about 'no status packet' are normal for EEPROM writes on Feetech motors.")
     homing_offsets = bus.set_half_turn_homings()
     
     logger.info("\nHoming offsets set:")
@@ -328,6 +346,8 @@ def set_middle_position(bus: FeetechBus) -> None:
     logger.info("\n✓ Middle position set successfully!")
     logger.info("The current position is now the middle point for all servos.")
     logger.info("Phase (Setting byte) has been set to 76 and Lock to 0 for all servos.")
+    logger.info("\nIMPORTANT: Power cycle the motors for the calibration to take effect!")
+    logger.info("After power cycling, motors will read ~2048 at their calibrated position.")
 
 
 def main():
@@ -363,6 +383,9 @@ def main():
         # Connect to motors
         bus.connect()
         
+        # Configure motors for calibration
+        bus.configure_motors()
+
         # Set middle position
         set_middle_position(bus)
         
