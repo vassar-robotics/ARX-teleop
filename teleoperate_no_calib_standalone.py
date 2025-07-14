@@ -21,7 +21,7 @@ python teleoperate_no_calib_standalone.py
 python teleoperate_no_calib_standalone.py --leader_port=/dev/ttyUSB0 --follower_port=/dev/ttyUSB1
 
 # Custom motor IDs and settings:
-python teleoperate_no_calib_standalone.py --motor_ids=1,2,3,4,5,6,7 --fps=30
+python teleoperate_no_calib_standalone.py --motor_ids=1,2,3,4 --fps=30
 ```
 """
 
@@ -327,8 +327,8 @@ def teleoperation_loop(leader: SO101Controller, follower: SO101Controller,
 
 def main():
     parser = argparse.ArgumentParser(description="Standalone teleoperation for SO101 robots with STS3215 servos")
-    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7",
-                       help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6,7)")
+    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6",
+                       help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6)")
     parser.add_argument("--leader_port", type=str,
                        help="Serial port for leader robot (5V)")
     parser.add_argument("--follower_port", type=str,
