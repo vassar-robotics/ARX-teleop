@@ -7,12 +7,15 @@ implementing the same algorithm in a standalone fashion.
 
 The key steps are:
 1. Disable torque
-2. Set Phase=76 and Lock=0
-3. Set operating mode to position mode
-4. Reset calibration (homing offset to 0, limits to full range)
-5. Read current positions
-6. Calculate homing offsets (current_position - 2048)
-7. Write homing offsets
+2. Detect voltage and set Phase accordingly:
+   - Leader arm (5V): Phase=76
+   - Follower arm (12V): Phase=12
+3. Set Lock=0
+4. Set operating mode to position mode
+5. Reset calibration (homing offset to 0, limits to full range)
+6. Read current positions
+7. Calculate homing offsets (current_position - 2048)
+8. Write homing offsets
 
 Example usage:
 ```shell
@@ -103,6 +106,7 @@ class FeetechBus:
     PRESENT_POSITION = 56
     RESPONSE_STATUS_LEVEL = 8
     RETURN_DELAY_TIME = 7
+    PRESENT_VOLTAGE = 62
     
     # Model resolutions
     RESOLUTIONS = {
@@ -256,6 +260,33 @@ class FeetechBus:
             # Set Response_Status_Level to 2 (return status packet for all commands)
             self.write("Response_Status_Level", motor_id, 2)
     
+    def read_voltage(self) -> float:
+        """Read voltage from the first motor."""
+        if self.packet_handler is None or self.port_handler is None:
+            raise RuntimeError("Not connected to motors")
+            
+        motor_id = self.motor_ids[0]  # Read from first motor
+        try:
+            result = self.packet_handler.read1ByteTxRx(
+                self.port_handler, motor_id, self.PRESENT_VOLTAGE)
+            
+            # Handle different return formats
+            if isinstance(result, tuple) and len(result) >= 2:
+                if len(result) >= 3:
+                    raw_voltage, comm_result, error = result[:3]
+                else:
+                    raw_voltage, comm_result = result[:2]
+                
+                if comm_result == self.scs.COMM_SUCCESS:
+                    # Feetech motors report voltage in units of 0.1V
+                    return raw_voltage / 10.0
+                else:
+                    raise RuntimeError(f"Failed to read voltage: {self.packet_handler.getTxRxResult(comm_result)}")
+            else:
+                raise RuntimeError(f"Unexpected read result: {result}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to read voltage from motor {motor_id}: {str(e)}")
+    
     def reset_calibration(self, motors: Optional[List[int]] = None) -> None:
         """
         Reset calibration to factory defaults.
@@ -318,15 +349,29 @@ def set_middle_position(bus: FeetechBus) -> None:
     """
     logger.info(f"\nSetting middle position for motors: {bus.motor_ids}")
     
+    # Detect voltage to determine if leader (5V) or follower (12V)
+    try:
+        voltage = bus.read_voltage()
+        is_leader = 4.5 <= voltage <= 5.5  # Leader is ~5V
+        robot_type = "LEADER" if is_leader else "FOLLOWER"
+        phase_value = 76 if is_leader else 12
+        
+        logger.info(f"Detected {robot_type} robot (voltage: {voltage:.1f}V)")
+        logger.info(f"Will set Phase={phase_value} for {robot_type} robot")
+    except Exception as e:
+        logger.warning(f"Failed to detect voltage: {e}")
+        logger.warning("Defaulting to Phase=76 (leader)")
+        phase_value = 76
+    
     # Disable torque to allow manual positioning
     bus.disable_torque()
     
-    # Set Phase to 76 and Lock to 0 for all servos
-    logger.info("Setting Phase to 76 and Lock to 0 for all servos...")
+    # Set Phase and Lock to 0 for all servos
+    logger.info(f"Setting Phase to {phase_value} and Lock to 0 for all servos...")
     for motor_id in bus.motor_ids:
-        bus.write("Phase", motor_id, 76)
+        bus.write("Phase", motor_id, phase_value)
         bus.write("Lock", motor_id, 0)
-        logger.debug(f"Set Phase=76 and Lock=0 for motor: {motor_id}")
+        logger.debug(f"Set Phase={phase_value} and Lock=0 for motor: {motor_id}")
     
     # Set operating mode to position mode (0)
     for motor_id in bus.motor_ids:
@@ -345,7 +390,7 @@ def set_middle_position(bus: FeetechBus) -> None:
     
     logger.info("\n✓ Middle position set successfully!")
     logger.info("The current position is now the middle point for all servos.")
-    logger.info("Phase (Setting byte) has been set to 76 and Lock to 0 for all servos.")
+    logger.info(f"Phase (Setting byte) has been set to {phase_value} and Lock to 0 for all servos.")
     logger.info("\nIMPORTANT: Power cycle the motors for the calibration to take effect!")
     logger.info("After power cycling, motors will read ~2048 at their calibrated position.")
 
