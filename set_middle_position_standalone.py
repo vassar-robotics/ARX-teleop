@@ -166,9 +166,21 @@ class FeetechController:
             
         # Test connection by pinging motors
         for motor_id in self.motor_ids:
-            model_number, result, error = self.packet_handler.ping(self.port_handler, motor_id)
-            if result != self.scs.COMM_SUCCESS:
-                raise RuntimeError(f"Failed to ping motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+            try:
+                ping_result = self.packet_handler.ping(self.port_handler, motor_id)
+                # Handle different return formats from Feetech SDK
+                if len(ping_result) >= 3:
+                    model_number, result, error = ping_result
+                elif len(ping_result) == 2:
+                    model_number, result = ping_result
+                    error = 0
+                else:
+                    raise RuntimeError(f"Unexpected ping result format: {ping_result}")
+                
+                if result != self.scs.COMM_SUCCESS:
+                    raise RuntimeError(f"Failed to ping motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to ping motor {motor_id}: {str(e)}")
                 
         self.connected = True
         logger.info(f"Connected to Feetech motors: {self.motor_ids}")
@@ -222,31 +234,36 @@ class FeetechController:
             original_offset = offset
             # Convert negative offsets for sign-magnitude encoding
             if offset < 0:
-                offset = abs(offset) | (1 << 11)  # Set sign bit (bit 11)
+                encoded_offset = abs(offset) | (1 << 11)  # Set sign bit (bit 11)
+            else:
+                encoded_offset = offset
+            
+            logger.debug(f"Motor {motor_id}: original={original_offset}, encoded={encoded_offset}")
             
             # Try up to 3 times for each motor
             success = False
             for attempt in range(3):
-                # Ping motor first to ensure it's responding
-                if attempt > 0:  # Only ping on retries
-                    ping_result = self.packet_handler.ping(self.port_handler, motor_id)
-                    if ping_result[1] != self.scs.COMM_SUCCESS:
-                        logger.warning(f"Motor {motor_id} not responding to ping")
-                        time.sleep(0.5)
-                        continue
+                # Add delay before retry attempts
+                if attempt > 0:
+                    time.sleep(1.0)  # Wait 1 second before retrying
                 
-                result, error = self.packet_handler.write2ByteTxRx(
-                    self.port_handler, motor_id, self.HOMING_OFFSET, offset)
-                if result == self.scs.COMM_SUCCESS:
-                    logger.info(f"  ✓ Motor {motor_id}: offset {original_offset} ({i+1}/{len(offsets)})")
-                    success = True
-                    break
-                else:
-                    if attempt < 2:
-                        logger.warning(f"Failed to write offset to motor {motor_id} (attempt {attempt+1}/3), retrying...")
-                        time.sleep(0.5)
+                try:
+                    result, error = self.packet_handler.write2ByteTxRx(
+                        self.port_handler, motor_id, self.HOMING_OFFSET, encoded_offset)
+                    if result == self.scs.COMM_SUCCESS:
+                        logger.info(f"  ✓ Motor {motor_id}: offset {original_offset} ({i+1}/{len(offsets)})")
+                        success = True
+                        break
                     else:
-                        logger.error(f"Failed to write homing offset to motor {motor_id} after 3 attempts: {self.packet_handler.getTxRxResult(result)}")
+                        if attempt < 2:
+                            logger.warning(f"Failed to write offset to motor {motor_id} (attempt {attempt+1}/3): {self.packet_handler.getTxRxResult(result)}")
+                        else:
+                            logger.error(f"Failed to write homing offset to motor {motor_id} after 3 attempts: {self.packet_handler.getTxRxResult(result)}")
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning(f"Exception writing to motor {motor_id} (attempt {attempt+1}/3): {e}")
+                    else:
+                        logger.error(f"Failed to write homing offset to motor {motor_id} after 3 attempts: {e}")
             
             # Always add delay between motors, even longer if write failed
             if success:
@@ -318,8 +335,14 @@ def set_middle_position(controller: FeetechController) -> None:
     # Calculate homing offsets
     offsets = controller.calculate_homing_offsets(positions)
     
+    # Display calculated offsets
+    logger.info("\nCalculated homing offsets:")
+    for motor_id, offset in offsets.items():
+        current_pos = positions.get(motor_id, 0)
+        logger.info(f"  Motor {motor_id}: current={current_pos}, offset={offset}")
+    
     # Add delay before writing to allow bus to stabilize
-    logger.info("Waiting for bus to stabilize...")
+    logger.info("\nWaiting for bus to stabilize...")
     time.sleep(1.0)
     
     # Make sure torque is still disabled before writing offsets
