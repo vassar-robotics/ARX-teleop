@@ -126,6 +126,8 @@ class FeetechController:
     PHASE = 18
     LOCK = 55
     PRESENT_VOLTAGE = 62
+    MIN_POSITION_LIMIT = 9
+    MAX_POSITION_LIMIT = 11
     
     def __init__(self, port: str, motor_ids: List[int], baudrate: int = 1000000, 
                  motor_model: str = "sts3215"):
@@ -234,6 +236,37 @@ class FeetechController:
                 logger.warning(f"Failed to read position from motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
         return positions
         
+    def reset_calibration(self) -> None:
+        """Reset calibration to factory defaults before setting new homing offsets.
+        
+        This is a critical step from LeRobot that ensures:
+        1. Homing offset starts at 0
+        2. Position limits are set to full range (0 to resolution-1)
+        3. The motor has a clean state before applying new calibration
+        """
+        logger.info("Resetting calibration to factory defaults...")
+        for motor_id in self.motor_ids:
+            # Set Homing_Offset to 0
+            result, error = self.packet_handler.write2ByteTxRx(
+                self.port_handler, motor_id, self.HOMING_OFFSET, 0)
+            if result != self.scs.COMM_SUCCESS:
+                logger.warning(f"Failed to reset homing offset on motor {motor_id}")
+            
+            # Set Min_Position_Limit to 0
+            result, error = self.packet_handler.write2ByteTxRx(
+                self.port_handler, motor_id, self.MIN_POSITION_LIMIT, 0)
+            if result != self.scs.COMM_SUCCESS:
+                logger.warning(f"Failed to reset min position limit on motor {motor_id}")
+                
+            # Set Max_Position_Limit to max resolution - 1
+            max_position = self.resolution - 1
+            result, error = self.packet_handler.write2ByteTxRx(
+                self.port_handler, motor_id, self.MAX_POSITION_LIMIT, max_position)
+            if result != self.scs.COMM_SUCCESS:
+                logger.warning(f"Failed to reset max position limit on motor {motor_id}")
+                
+            time.sleep(0.1)  # Small delay between motors
+            
     def write_homing_offsets(self, offsets: Dict[int, int]) -> None:
         """Write homing offsets to all motors."""
         logger.info(f"Writing homing offsets to {len(offsets)} motors (with delays for bus stability)...")
@@ -284,25 +317,19 @@ class FeetechController:
             else:
                 time.sleep(1.5)  # Extra delay after failure
                 
-    def set_phase_and_lock(self, phase_value: int = 76) -> None:
-        """Set Phase and Lock=0 for Feetech motors.
+    def set_phase(self, phase_value: int = 76) -> None:
+        """Set Phase for Feetech motors.
         
         Args:
             phase_value: Phase value to set (default: 76)
         """
-        logger.info(f"Setting Phase={phase_value} and Lock=0 for all motors...")
+        logger.info(f"Setting Phase={phase_value} for all motors...")
         for motor_id in self.motor_ids:
             # Set Phase (Setting byte) to specified value
             result, error = self.packet_handler.write1ByteTxRx(
                 self.port_handler, motor_id, self.PHASE, phase_value)
             if result != self.scs.COMM_SUCCESS:
                 logger.warning(f"Failed to set Phase on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
-                
-            # Set Lock to 0
-            result, error = self.packet_handler.write1ByteTxRx(
-                self.port_handler, motor_id, self.LOCK, 0)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to set Lock on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
             
             # Add delay to prevent bus bandwidth issues
             time.sleep(0.1)  # Shorter delay since these are single-byte writes
@@ -320,11 +347,18 @@ class FeetechController:
             time.sleep(0.1)  # Shorter delay since these are single-byte writes
                 
     def calculate_homing_offsets(self, positions: Dict[int, int]) -> Dict[int, int]:
-        """Calculate homing offsets for Feetech motors."""
+        """Calculate homing offsets for Feetech motors.
+        
+        Formula from LeRobot:
+        On Feetech Motors: Present_Position = Actual_Position - Homing_Offset
+        To make current position become the middle (2048 for 4096 resolution):
+        homing_offset = current_position - (resolution / 2)
+        """
         offsets = {}
         for motor_id, pos in positions.items():
             # For Feetech: homing_offset = current_pos - int(max_res / 2)
-            offsets[motor_id] = pos - int(self.resolution / 2)
+            middle_position = int(self.resolution / 2)
+            offsets[motor_id] = pos - middle_position
         return offsets
 
 
@@ -353,8 +387,8 @@ def set_middle_position(controller: FeetechController) -> int:
     # Disable torque to allow manual positioning
     controller.disable_torque()
     
-    # Set Phase and Lock=0 based on robot type
-    controller.set_phase_and_lock(phase_value)
+    # Set Phase based on robot type
+    controller.set_phase(phase_value)
     
     # Set operating mode
     controller.set_operating_mode()
@@ -367,6 +401,10 @@ def set_middle_position(controller: FeetechController) -> int:
         logger.error("Failed to read positions from any motor")
         return phase_value  # Return the phase value even on error
         
+    # Reset calibration to factory defaults (CRITICAL STEP from LeRobot)
+    controller.reset_calibration()
+    time.sleep(0.5)  # Let the reset take effect
+    
     # Calculate homing offsets
     offsets = controller.calculate_homing_offsets(positions)
     
@@ -390,7 +428,7 @@ def set_middle_position(controller: FeetechController) -> int:
     
     logger.info("\n✓ Middle position set successfully!")
     logger.info("The current position is now the middle point for all servos.")
-    logger.info(f"Phase (Setting byte) has been set to {phase_value} and Lock to 0 for all servos.")
+    logger.info(f"Phase (Setting byte) has been set to {phase_value} for all servos.")
     
     return phase_value
 
