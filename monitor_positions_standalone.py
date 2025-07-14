@@ -161,42 +161,92 @@ class MotorMonitor:
         """Read current positions from all motors."""
         positions = {}
         for motor_id in self.motor_ids:
-            position, result, error = self.packet_handler.read2ByteTxRx(
-                self.port_handler, motor_id, self.PRESENT_POSITION)
-            if result == self.scs.COMM_SUCCESS:
-                positions[motor_id] = position
-            else:
+            try:
+                read_result = self.packet_handler.read2ByteTxRx(
+                    self.port_handler, motor_id, self.PRESENT_POSITION)
+                
+                # Handle different return formats
+                if len(read_result) >= 3:
+                    position, result, error = read_result
+                elif len(read_result) == 2:
+                    position, result = read_result
+                    error = 0
+                else:
+                    positions[motor_id] = -1  # Error value
+                    continue
+                    
+                if result == self.scs.COMM_SUCCESS:
+                    positions[motor_id] = position
+                else:
+                    positions[motor_id] = -1  # Error value
+            except Exception:
                 positions[motor_id] = -1  # Error value
         return positions
         
     def read_voltage(self, motor_id: int) -> float:
         """Read voltage from a specific motor."""
-        raw_voltage, result, error = self.packet_handler.read1ByteTxRx(
-            self.port_handler, motor_id, self.PRESENT_VOLTAGE)
-        
-        if result == self.scs.COMM_SUCCESS:
-            return raw_voltage / 10.0  # Convert to volts
-        else:
+        try:
+            read_result = self.packet_handler.read1ByteTxRx(
+                self.port_handler, motor_id, self.PRESENT_VOLTAGE)
+            
+            # Handle different return formats
+            if len(read_result) >= 3:
+                raw_voltage, result, error = read_result
+            elif len(read_result) == 2:
+                raw_voltage, result = read_result
+                error = 0
+            else:
+                return -1.0
+                
+            if result == self.scs.COMM_SUCCESS:
+                return raw_voltage / 10.0  # Convert to volts
+            else:
+                return -1.0
+        except Exception:
             return -1.0
             
     def read_temperature(self, motor_id: int) -> int:
         """Read temperature from a specific motor."""
-        temp, result, error = self.packet_handler.read1ByteTxRx(
-            self.port_handler, motor_id, self.PRESENT_TEMPERATURE)
-        
-        if result == self.scs.COMM_SUCCESS:
-            return temp
-        else:
+        try:
+            read_result = self.packet_handler.read1ByteTxRx(
+                self.port_handler, motor_id, self.PRESENT_TEMPERATURE)
+            
+            # Handle different return formats
+            if len(read_result) >= 3:
+                temp, result, error = read_result
+            elif len(read_result) == 2:
+                temp, result = read_result
+                error = 0
+            else:
+                return -1
+                
+            if result == self.scs.COMM_SUCCESS:
+                return temp
+            else:
+                return -1
+        except Exception:
             return -1
             
     def read_load(self, motor_id: int) -> int:
         """Read load from a specific motor."""
-        load, result, error = self.packet_handler.read2ByteTxRx(
-            self.port_handler, motor_id, self.PRESENT_LOAD)
-        
-        if result == self.scs.COMM_SUCCESS:
-            return load
-        else:
+        try:
+            read_result = self.packet_handler.read2ByteTxRx(
+                self.port_handler, motor_id, self.PRESENT_LOAD)
+            
+            # Handle different return formats
+            if len(read_result) >= 3:
+                load, result, error = read_result
+            elif len(read_result) == 2:
+                load, result = read_result
+                error = 0
+            else:
+                return -1
+                
+            if result == self.scs.COMM_SUCCESS:
+                return load
+            else:
+                return -1
+        except Exception:
             return -1
 
 

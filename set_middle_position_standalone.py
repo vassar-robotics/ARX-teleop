@@ -197,14 +197,26 @@ class FeetechController:
     def read_voltage(self) -> float:
         """Read voltage from the first motor."""
         motor_id = self.motor_ids[0]
-        raw_voltage, result, error = self.packet_handler.read1ByteTxRx(
-            self.port_handler, motor_id, self.PRESENT_VOLTAGE)
-        
-        if result != self.scs.COMM_SUCCESS:
-            raise RuntimeError(f"Failed to read voltage: {self.packet_handler.getTxRxResult(result)}")
+        try:
+            read_result = self.packet_handler.read1ByteTxRx(
+                self.port_handler, motor_id, self.PRESENT_VOLTAGE)
             
-        # Feetech motors report voltage in units of 0.1V
-        return raw_voltage / 10.0
+            # Handle different return formats
+            if len(read_result) >= 3:
+                raw_voltage, result, error = read_result
+            elif len(read_result) == 2:
+                raw_voltage, result = read_result
+                error = 0
+            else:
+                raise RuntimeError(f"Unexpected read result format: {read_result}")
+            
+            if result != self.scs.COMM_SUCCESS:
+                raise RuntimeError(f"Failed to read voltage: {self.packet_handler.getTxRxResult(result)}")
+                
+            # Feetech motors report voltage in units of 0.1V
+            return raw_voltage / 10.0
+        except Exception as e:
+            raise RuntimeError(f"Failed to read voltage from motor {motor_id}: {str(e)}")
         
     def disable_torque(self) -> None:
         """Disable torque on all motors."""
@@ -228,12 +240,26 @@ class FeetechController:
         """Read current positions from all motors."""
         positions = {}
         for motor_id in self.motor_ids:
-            position, result, error = self.packet_handler.read2ByteTxRx(
-                self.port_handler, motor_id, self.PRESENT_POSITION)
-            if result == self.scs.COMM_SUCCESS:
-                positions[motor_id] = position
-            else:
-                logger.warning(f"Failed to read position from motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+            try:
+                read_result = self.packet_handler.read2ByteTxRx(
+                    self.port_handler, motor_id, self.PRESENT_POSITION)
+                
+                # Handle different return formats
+                if len(read_result) >= 3:
+                    position, result, error = read_result
+                elif len(read_result) == 2:
+                    position, result = read_result
+                    error = 0
+                else:
+                    logger.warning(f"Unexpected read result format from motor {motor_id}: {read_result}")
+                    continue
+                    
+                if result == self.scs.COMM_SUCCESS:
+                    positions[motor_id] = position
+                else:
+                    logger.warning(f"Failed to read position from motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+            except Exception as e:
+                logger.warning(f"Exception reading position from motor {motor_id}: {e}")
         return positions
         
     def reset_calibration(self) -> None:
@@ -307,15 +333,29 @@ class FeetechController:
     
     def read_homing_offset(self, motor_id: int) -> int | None:
         """Read the current homing offset from a motor."""
-        offset, result, error = self.packet_handler.read2ByteTxRx(
-            self.port_handler, motor_id, self.HOMING_OFFSET)
-        
-        if result == self.scs.COMM_SUCCESS:
-            # Decode sign-magnitude if needed
-            if offset & (1 << 11):  # Check sign bit
-                offset = -(offset & 0x7FF)  # Clear sign bit and negate
-            return offset
-        else:
+        try:
+            read_result = self.packet_handler.read2ByteTxRx(
+                self.port_handler, motor_id, self.HOMING_OFFSET)
+            
+            # Handle different return formats
+            if len(read_result) >= 3:
+                offset, result, error = read_result
+            elif len(read_result) == 2:
+                offset, result = read_result
+                error = 0
+            else:
+                logger.debug(f"Unexpected read result format from motor {motor_id}: {read_result}")
+                return None
+            
+            if result == self.scs.COMM_SUCCESS:
+                # Decode sign-magnitude if needed
+                if offset & (1 << 11):  # Check sign bit
+                    offset = -(offset & 0x7FF)  # Clear sign bit and negate
+                return offset
+            else:
+                return None
+        except Exception as e:
+            logger.debug(f"Error reading homing offset from motor {motor_id}: {e}")
             return None
             
     def write_homing_offsets(self, offsets: Dict[int, int]) -> None:
