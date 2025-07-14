@@ -166,7 +166,7 @@ class FeetechController:
             
         # Test connection by pinging motors
         for motor_id in self.motor_ids:
-            result, error = self.packet_handler.ping(self.port_handler, motor_id)
+            model_number, result, error = self.packet_handler.ping(self.port_handler, motor_id)
             if result != self.scs.COMM_SUCCESS:
                 raise RuntimeError(f"Failed to ping motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
                 
