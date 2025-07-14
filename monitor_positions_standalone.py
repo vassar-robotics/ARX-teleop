@@ -1,28 +1,10 @@
 #!/usr/bin/env python3
 """
-Standalone script to continuously monitor and display motor positions.
+Standalone script to monitor Feetech servo motor positions in real-time.
+Displays current positions, homing offsets, and other diagnostic information.
 
-This script connects to Feetech servo motors and displays their positions in real-time,
-useful for debugging and monitoring motor states.
-
-Requirements:
-- pyserial
-- scservo_sdk (for Feetech motors)
-
-Example usage:
-```shell
-# Basic usage (auto-detect port, motor IDs 1-6):
-python monitor_positions_standalone.py
-
-# Custom motor IDs:
-python monitor_positions_standalone.py --motor_ids=1,2,3,4
-
-# Specify port manually:
-python monitor_positions_standalone.py --port=/dev/ttyUSB0
-
-# Custom refresh rate:
-python monitor_positions_standalone.py --fps=10
-```
+This script connects to Feetech servo motors and continuously displays their
+current positions and calibration status.
 """
 
 import argparse
@@ -94,22 +76,40 @@ def busy_wait(duration: float) -> None:
         pass
 
 
-class MotorMonitor:
-    """Monitor for Feetech motors."""
+class FeetechController:
+    """Controller for Feetech motors."""
     
     # Feetech register addresses
+    TORQUE_ENABLE = 40
     PRESENT_POSITION = 56
     PRESENT_VOLTAGE = 62
     PRESENT_TEMPERATURE = 63
-    PRESENT_LOAD = 60
+    HOMING_OFFSET = 31
+    MIN_POSITION_LIMIT = 9
+    MAX_POSITION_LIMIT = 11
+    PHASE = 18
+    LOCK = 55
+    OPERATING_MODE = 33
+    PRESENT_LOAD = 60  # Re-add this since it's used in the code
     
-    def __init__(self, port: str, motor_ids: List[int], baudrate: int = 1000000):
+    def __init__(self, port: str, motor_ids: List[int], baudrate: int = 1000000,
+                 motor_model: str = "sts3215"):
         self.port = port
         self.motor_ids = motor_ids
         self.baudrate = baudrate
+        self.motor_model = motor_model
         self.connected = False
-        self.resolution = 4096  # STS3215 has 4096 resolution
         
+        # Set resolution based on motor model
+        if motor_model in ["sts3215", "sts3250"]:
+            self.resolution = 4096
+        elif motor_model == "sm8512bl":
+            self.resolution = 65536
+        elif motor_model == "scs0009":
+            self.resolution = 1024
+        else:
+            self.resolution = 4096  # Default
+            
         try:
             import scservo_sdk as scs  # type: ignore
             self.scs = scs
@@ -249,14 +249,92 @@ class MotorMonitor:
         except Exception:
             return -1
 
+    def read_homing_offsets(self) -> Dict[int, int | None]:
+        """Read homing offsets from all motors."""
+        offsets = {}
+        for motor_id in self.motor_ids:
+            try:
+                read_result = self.packet_handler.read2ByteTxRx(
+                    self.port_handler, motor_id, self.HOMING_OFFSET)
+                
+                # Handle different return formats
+                if len(read_result) >= 3:
+                    offset, result, error = read_result
+                elif len(read_result) == 2:
+                    offset, result = read_result
+                    error = 0
+                else:
+                    offsets[motor_id] = None
+                    continue
+                    
+                if result == self.scs.COMM_SUCCESS:
+                    # Decode sign-magnitude if needed
+                    if offset & (1 << 11):  # Check sign bit
+                        offset = -(offset & 0x7FF)  # Clear sign bit and negate
+                    offsets[motor_id] = offset
+                else:
+                    offsets[motor_id] = None
+            except Exception:
+                offsets[motor_id] = None
+        return offsets
+        
+    def read_phase_values(self) -> Dict[int, int | None]:
+        """Read Phase values from all motors."""
+        phases = {}
+        for motor_id in self.motor_ids:
+            try:
+                read_result = self.packet_handler.read1ByteTxRx(
+                    self.port_handler, motor_id, self.PHASE)
+                
+                # Handle different return formats
+                if len(read_result) >= 3:
+                    phase, result, error = read_result
+                elif len(read_result) == 2:
+                    phase, result = read_result
+                    error = 0
+                else:
+                    phases[motor_id] = None
+                    continue
+                    
+                if result == self.scs.COMM_SUCCESS:
+                    phases[motor_id] = phase
+                else:
+                    phases[motor_id] = None
+            except Exception:
+                phases[motor_id] = None
+        return phases
 
-def monitor_loop(monitor: MotorMonitor, fps: int = 30, show_extra: bool = False) -> None:
+
+def monitor_loop(monitor: FeetechController, fps: int = 30, show_extra: bool = False,
+                 show_diagnostics: bool = False) -> None:
     """Main monitoring loop."""
     logger.info("\n🔍 Starting position monitoring...")
+    logger.info(f"Motor IDs: {monitor.motor_ids}")
+    logger.info(f"Refresh rate: {fps} Hz")
     logger.info("Press Ctrl+C to stop\n")
     
-    # Wait a moment before starting
-    time.sleep(0.5)
+    # Show initial diagnostics if requested
+    if show_diagnostics:
+        print("\n" + "="*80)
+        print("MOTOR DIAGNOSTICS")
+        print("="*80)
+        
+        # Read diagnostic info
+        homing_offsets = monitor.read_homing_offsets()
+        phase_values = monitor.read_phase_values()
+        
+        print(f"\n{'Motor':<10} {'Homing Offset':<15} {'Phase':<10}")
+        print("-" * 35)
+        for motor_id in monitor.motor_ids:
+            offset = homing_offsets.get(motor_id, None)
+            phase = phase_values.get(motor_id, None)
+            offset_str = str(offset) if offset is not None else "N/A"
+            phase_str = str(phase) if phase is not None else "N/A"
+            print(f"{motor_id:<10} {offset_str:<15} {phase_str:<10}")
+        print("="*80 + "\n")
+    
+    # Calculate sleep time
+    sleep_time = 1.0 / fps
     
     # Read initial voltage to determine robot type
     voltage = monitor.read_voltage(monitor.motor_ids[0])
@@ -351,6 +429,8 @@ def main():
                        help="Target refresh rate in Hz (default: 30)")
     parser.add_argument("--extra", action="store_true",
                        help="Show extra info (voltage, temperature, load)")
+    parser.add_argument("--diagnostics", action="store_true",
+                       help="Show motor diagnostics (homing offsets, phase values)")
     
     args = parser.parse_args()
     
@@ -368,14 +448,14 @@ def main():
             return
     
     # Create monitor
-    monitor = MotorMonitor(port, motor_ids, args.baudrate)
+    monitor = FeetechController(port, motor_ids, args.baudrate)
     
     try:
         # Connect
         monitor.connect()
         
         # Run monitoring loop
-        monitor_loop(monitor, args.fps, args.extra)
+        monitor_loop(monitor, args.fps, args.extra, args.diagnostics)
         
     except KeyboardInterrupt:
         print("\n\n✋ Monitoring stopped by user")
