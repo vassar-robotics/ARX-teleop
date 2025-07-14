@@ -11,14 +11,17 @@ Requirements:
 
 Example usage:
 ```shell
-# Basic usage:
-python set_middle_position_standalone.py --motor_ids=1,2,3 --auto_detect_port
+# Basic usage (uses defaults: motor IDs 1-6, auto-detect port, baudrate 1M):
+python set_middle_position_standalone.py
 
-# Specify motor model:
-python set_middle_position_standalone.py --motor_ids=1,2,3 --motor_model=sts3215 --auto_detect_port
+# Custom motor IDs:
+python set_middle_position_standalone.py --motor_ids=1,2,3,4
+
+# Specify port manually:
+python set_middle_position_standalone.py --port=/dev/ttyUSB0
 
 # Continuous mode for multiple robots:
-python set_middle_position_standalone.py --motor_ids=1,2,3 --continuous
+python set_middle_position_standalone.py --continuous
 ```
 """
 
@@ -308,12 +311,12 @@ def process_single_robot(port: str, motor_ids: List[int], motor_model: str, baud
 
 def main():
     parser = argparse.ArgumentParser(description="Set Feetech servo motors to their middle position")
-    parser.add_argument("--motor_ids", type=str, required=True,
-                       help="Comma-separated list of motor IDs (e.g., 1,2,3)")
+    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6",
+                       help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6)")
     parser.add_argument("--port", type=str,
                        help="Serial port (e.g., /dev/ttyUSB0, COM3)")
     parser.add_argument("--auto_detect_port", action="store_true",
-                       help="Auto-detect the serial port")
+                       help="Auto-detect the serial port (deprecated, now default behavior)")
     parser.add_argument("--motor_model", type=str, default="sts3215",
                        help="Motor model (default: sts3215)")
     parser.add_argument("--baudrate", type=int, default=1000000,
@@ -328,18 +331,17 @@ def main():
     # Parse motor IDs
     motor_ids = [int(id.strip()) for id in args.motor_ids.split(",")]
     
-    # Determine port
-    if args.auto_detect_port:
+    # Determine port (auto-detect by default if no port specified)
+    if args.port:
+        port = args.port
+    else:
+        # Auto-detect port by default
         try:
             port = auto_detect_port()
+            logger.info(f"Auto-detected port: {port}")
         except RuntimeError as e:
             logger.error(str(e))
             return
-    elif args.port:
-        port = args.port
-    else:
-        logger.error("Either --port or --auto_detect_port must be specified")
-        return
     
     if args.single or not args.continuous:
         # Single robot mode
