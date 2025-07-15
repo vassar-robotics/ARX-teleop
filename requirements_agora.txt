@@ -1,0 +1,17 @@
+# Agora Video Streaming Requirements
+
+# Agora Python SDK
+agora-python-sdk>=3.1.2.10
+
+# Video capture and processing
+opencv-python>=4.5.0
+numpy>=1.20.0
+
+# GUI and image display
+Pillow>=8.0.0
+
+# Standard libraries (included with Python)
+# tkinter (usually comes with Python)
+# threading
+# queue
+# logging 
