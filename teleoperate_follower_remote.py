@@ -11,9 +11,29 @@ Usage:
     python teleoperate_follower_remote.py
 """
 
+import os
+import logging
+
+# Disable PubNub logging via environment variable
+os.environ['PUBNUB_LOG_LEVEL'] = 'NONE'
+
+# Configure logging BEFORE importing other modules
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+# Suppress verbose HTTP logs from various libraries
+logging.getLogger('urllib3').setLevel(logging.ERROR)
+logging.getLogger('requests').setLevel(logging.ERROR)
+logging.getLogger('httpx').setLevel(logging.ERROR)
+logging.getLogger('httpcore').setLevel(logging.ERROR)
+logging.getLogger('pubnub').setLevel(logging.WARNING)
+# Disable all INFO logs from modules starting with 'http'
+for name in logging.root.manager.loggerDict:
+    if name.startswith('http'):
+        logging.getLogger(name).setLevel(logging.ERROR)
+
 import argparse
 import json
-import logging
 import platform
 import signal
 import sys
@@ -44,10 +64,6 @@ except ImportError:
 # Import our modules
 import pubnub_config
 from teleoperate_multi_arms_standalone import SO101Controller, find_robot_ports, identify_robot_by_voltage
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -164,6 +180,9 @@ class FollowerTeleop:
         pnconfig.user_id = f"follower-{platform.node()}"
         pnconfig.ssl = True
         pnconfig.enable_subscribe = True
+        # Disable PubNub's internal logging
+        pnconfig.log_verbosity = False
+        pnconfig.enable_logging = False
         
         self.pubnub = PubNub(pnconfig)
         self.pubnub.add_listener(self.telemetry_listener)
