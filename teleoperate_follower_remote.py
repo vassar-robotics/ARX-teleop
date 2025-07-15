@@ -277,13 +277,7 @@ class FollowerTeleop:
         # Position smoothing
         self.smoothers = {}
         
-        # Mapping (will be dynamic in future)
-        self.mapping = {
-            "Leader1": "Follower1",
-            "Leader2": "Follower2"
-        }
-        
-        # Performance tracking
+        # Update tracking
         self.last_update_time = 0
         self.update_times = []
         self.latencies = []
@@ -402,6 +396,9 @@ class FollowerTeleop:
         sequence = telemetry_data.get("sequence", 0)
         positions_data = telemetry_data.get("positions", {})
         
+        # Debug logging
+        logger.debug(f"Received positions for: {list(positions_data.keys())}")
+        
         # Calculate latency
         latency = (time.time() - timestamp) * 1000  # ms
         self.latencies.append(latency)
@@ -416,26 +413,28 @@ class FollowerTeleop:
         # Send acknowledgment
         self.send_acknowledgment(sequence, timestamp)
         
-        # Apply positions based on mapping
-        for leader_id, leader_positions in positions_data.items():
-            follower_id = self.mapping.get(leader_id)
-            if not follower_id:
-                continue
-                
-            # Find the corresponding follower
+        # Apply positions - the leader already sends with follower IDs
+        for follower_id, follower_positions in positions_data.items():
+            # Find the corresponding follower robot
             follower = next((f for f in self.followers if f.robot_id == follower_id), None)
             if not follower:
+                logger.warning(f"No follower found with ID: {follower_id} (available: {[f.robot_id for f in self.followers]})")
                 continue
                 
             # Apply smoothing and send positions
+            if follower_id not in self.smoothers:
+                logger.warning(f"No smoother found for {follower_id}")
+                continue
+                
             smoother = self.smoothers[follower_id]
             smoothed_positions = {}
             
-            for motor_id_str, position in leader_positions.items():
+            for motor_id_str, position in follower_positions.items():
                 # Convert string motor ID back to int
                 motor_id = int(motor_id_str)
                 smoothed_positions[motor_id] = smoother.smooth(motor_id, position)
                 
+            logger.debug(f"Writing positions to {follower_id}: {smoothed_positions}")
             follower.write_positions(smoothed_positions)
             
     def display_status(self):
@@ -444,27 +443,29 @@ class FollowerTeleop:
         print("\033[2J\033[H", end="")
         
         print(f"{Style.BRIGHT}=== FOLLOWER TELEOPERATION ==={Style.RESET_ALL}")
-        print(f"Connected Followers: {len(self.followers)}")
-        print()
-        
-        # Current mapping
-        print(f"{Style.BRIGHT}Current Mapping:{Style.RESET_ALL}")
-        for leader, follower in self.mapping.items():
-            print(f"  {leader} → {follower}")
+        # Connected followers
+        print(f"{Style.BRIGHT}Connected Followers:{Style.RESET_ALL}")
+        for follower in self.followers:
+            print(f"  {follower.robot_id} - {len(follower.motor_ids)} motors")
         print()
         
         # Network stats
+        stats = {
+            'received': self.telemetry_listener.received_count,
+            'dropped': self.telemetry_listener.dropped_count,
+            'latency': self.latencies
+        }
         print(f"{Style.BRIGHT}Network Statistics:{Style.RESET_ALL}")
-        if self.latencies:
-            avg_latency = sum(self.latencies) / len(self.latencies)
-            max_latency = max(self.latencies)
+        if stats['latency']:
+            avg_latency = sum(stats['latency']) / len(stats['latency'])
+            max_latency = max(stats['latency'])
             print(f"  Average Latency: {avg_latency:.1f}ms")
             print(f"  Max Latency:     {max_latency:.1f}ms")
         else:
             print(f"  Latency: No data yet")
             
-        print(f"  Received:        {self.telemetry_listener.received_count}")
-        print(f"  Dropped:         {self.telemetry_listener.dropped_count}")
+        print(f"  Received:        {stats['received']}")
+        print(f"  Dropped:         {stats['dropped']}")
         
         # Update rate
         if self.update_times:
@@ -574,8 +575,15 @@ def main():
                        help="Comma-separated motor IDs")
     parser.add_argument("--baudrate", type=int, default=1000000,
                        help="Serial baudrate")
+    parser.add_argument("--debug", action="store_true",
+                       help="Enable debug logging")
     
     args = parser.parse_args()
+    
+    # Set logging level
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
     
     # Parse motor IDs
     motor_ids = [int(id.strip()) for id in args.motor_ids.split(",")]
