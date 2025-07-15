@@ -39,7 +39,11 @@ APP_ID = "your-app-id-here"
 
 ## Usage
 
-### On the Follower Computer (Robot side):
+You can use either desktop applications or web-based interfaces:
+
+### Option 1: Desktop Applications
+
+#### On the Follower Computer (Robot side):
 
 1. Connect your cameras to the computer
 2. Navigate to the agora folder and run:
@@ -51,7 +55,7 @@ python video_stream_follower.py
 4. Select which 3 cameras you want to use from the dropdown menus
 5. Click "Start Streaming"
 
-### On the Leader Computer (Operator side):
+#### On the Leader Computer (Operator side):
 
 1. Navigate to the agora folder and run:
 ```bash
@@ -60,6 +64,31 @@ python video_stream_leader.py
 ```
 2. Click "Start Receiving"
 3. You should see 3 video feeds from the follower at 480p resolution
+
+### Option 2: Web-Based Interfaces
+
+#### On the Follower Computer (Robot side):
+
+1. Connect your cameras to the computer
+2. Navigate to the agora folder and run:
+```bash
+cd agora
+python video_stream_follower_web.py
+```
+3. A browser will open at http://127.0.0.1:5002
+4. Select your cameras from the dropdown menus
+5. Click "Start Streaming"
+
+#### On the Leader Computer (Operator side):
+
+1. Navigate to the agora folder and run:
+```bash
+cd agora
+python video_stream_leader_web.py
+```
+2. A browser will open at http://127.0.0.1:5001
+3. Click "Start Receiving"
+4. You should see 3 video feeds from the follower
 
 ## Camera Selection
 

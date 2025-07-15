@@ -10,6 +10,9 @@ numpy>=1.20.0
 # GUI and image display
 Pillow>=8.0.0
 
+# Web interface
+Flask>=2.0.0
+
 # Standard libraries (included with Python)
 # tkinter (usually comes with Python)
 # threading
