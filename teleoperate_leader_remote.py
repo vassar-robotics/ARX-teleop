@@ -158,20 +158,19 @@ class StatusListener(SubscribeCallback):
             self.follower_status[data.get("follower_id")] = data
             
 
-class KeyboardListener:
-    """Non-blocking keyboard input listener for mapping control."""
+class KeyboardListener(threading.Thread):
+    """Thread to listen for keyboard input without blocking or modifying terminal."""
     
     def __init__(self):
+        super().__init__(daemon=True)
         self.switch_requested = False
         self.stop_requested = False
-        self._listener_thread = None
-        self._running = False
+        self._running = True
         
     def start(self):
-        """Start the keyboard listener in a separate thread."""
+        """Start the listener thread."""
         self._running = True
-        self._listener_thread = threading.Thread(target=self._listen, daemon=True)
-        self._listener_thread.start()
+        super().start()
         
     def stop(self):
         """Stop the keyboard listener."""
@@ -179,43 +178,26 @@ class KeyboardListener:
         
     def _listen(self):
         """Listen for keyboard input."""
-        try:
-            # For Unix-like systems (Linux, macOS)
-            import termios
-            import tty
-            
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
+        # Simple polling approach that doesn't modify terminal settings
+        logger.info("Keyboard listener active - type 's' and press Enter to switch mapping")
+        while self._running:
             try:
-                tty.setraw(sys.stdin.fileno())
-                while self._running:
-                    if select and sys.stdin in select.select([sys.stdin], [], [], 0.1)[0]:
-                        key = sys.stdin.read(1)
-                        if key.lower() == 's':
-                            self.switch_requested = True
-                        elif key == '\x03':  # Ctrl+C
-                            self.stop_requested = True
-                            break
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        except ImportError:
-            # Fallback for Windows
-            while self._running:
-                try:
-                    import msvcrt
-                    if msvcrt.kbhit():
-                        key = msvcrt.getch()
-                        if key.lower() == b's':
-                            self.switch_requested = True
-                        elif key == b'\x03':  # Ctrl+C
-                            self.stop_requested = True
-                            break
-                except:
-                    pass
-                time.sleep(0.1)
-        except Exception:
-            # Ultimate fallback - no keyboard support
-            logger.warning("Keyboard input not supported on this system")
+                # Non-blocking check for input
+                if select and sys.stdin in select.select([sys.stdin], [], [], 0.1)[0]:
+                    line = sys.stdin.readline().strip()
+                    if line.lower() == 's':
+                        logger.info("📌 Switching mapping...")
+                        self.switch_requested = True
+                    elif line.lower() in ['q', 'quit', 'exit']:
+                        self.stop_requested = True
+                        break
+            except:
+                pass
+            time.sleep(0.1)
+                
+    def run(self):
+        """Run the keyboard listener."""
+        self._listen()
 
 
 class LeaderTeleop:
@@ -307,6 +289,16 @@ class LeaderTeleop:
         
     def switch_mapping(self):
         """Switch the leader-follower mapping."""
+        # Check if we have exactly 2 leaders
+        if len(self.leaders) != 2:
+            logger.warning(f"❌ Cannot switch mapping: Need exactly 2 leaders, but found {len(self.leaders)}")
+            return
+            
+        # Check if mapping is properly initialized
+        if not self.mapping or len(self.mapping) != 2:
+            logger.warning("❌ Cannot switch mapping: Mapping not properly initialized")
+            return
+            
         # Swap the assignments
         current_followers = list(self.mapping.values())
         self.mapping = {
@@ -353,42 +345,42 @@ class LeaderTeleop:
         """Display current status and statistics."""
         stats = self.monitor.get_stats()
         
-        # Clear screen and move cursor to top
-        print("\033[2J\033[H", end="")
+        # Simple approach - just print with newlines
+        print("\n" * 50)  # Clear screen by scrolling
         
-        print(f"{Style.BRIGHT}=== LEADER TELEOPERATION ==={Style.RESET_ALL}")
+        print("=== LEADER TELEOPERATION ===")
         print(f"Connected Leaders: {len(self.leaders)}")
         print()
         
         # Current mapping
-        print(f"{Style.BRIGHT}Current Mapping:{Style.RESET_ALL}")
+        print("Current Mapping:")
         for leader_id, follower_id in self.mapping.items():
             print(f"  {leader_id} → {follower_id}")
         print()
         
         # Network stats
-        print(f"{Style.BRIGHT}Network Statistics:{Style.RESET_ALL}")
-        print(f"  Average Latency: {stats['avg_latency']:.1f}ms")
-        print(f"  Max Latency:     {stats['max_latency']:.1f}ms")
-        print(f"  Packet Loss:     {stats['packet_loss']*100:.1f}%")
-        print(f"  Messages Sent:   {stats['sent']}")
+        print("Network Statistics:")
+        print(f"  Average Latency: {stats['avg_latency']:6.1f}ms")
+        print(f"  Max Latency:     {stats['max_latency']:6.1f}ms")
+        print(f"  Packet Loss:     {stats['packet_loss']*100:6.1f}%")
+        print(f"  Messages Sent:   {stats['sent']:6d}")
         
         # Publish rate
         if self.publish_times:
             avg_interval = sum(self.publish_times) / len(self.publish_times)
             actual_fps = 1.0 / avg_interval if avg_interval > 0 else 0
-            print(f"  Publish Rate:    {actual_fps:.1f} Hz")
+            print(f"  Publish Rate:    {actual_fps:6.1f} Hz")
             
         # Follower status
         print()
-        print(f"{Style.BRIGHT}Follower Status:{Style.RESET_ALL}")
+        print("Follower Status:")
         for follower_id, status in self.status_listener.follower_status.items():
             age = time.time() - status.get("timestamp", 0)
             if age < 5:  # Only show recent status
                 print(f"  {follower_id}: Connected, {status.get('motors_active', 0)} motors active")
                 
         print()
-        print(f"{Fore.CYAN}Press 's' to switch mapping, Ctrl+C to stop{Style.RESET_ALL}")
+        print("Press 's' + Enter to switch mapping, Ctrl+C to stop")
         
     def teleoperation_loop(self):
         """Main loop reading positions and publishing."""
@@ -402,7 +394,7 @@ class LeaderTeleop:
         # Start keyboard listener
         self.keyboard = KeyboardListener()
         self.keyboard.start()
-        logger.info("Keyboard listener started - press 's' to switch mapping")
+        logger.info("Keyboard listener started - type 's' + Enter to switch mapping")
         
         logger.info(f"Starting teleoperation at {pubnub_config.TARGET_FPS} Hz...")
         
@@ -413,6 +405,7 @@ class LeaderTeleop:
                 # Check for keyboard input
                 if self.keyboard:
                     if self.keyboard.switch_requested:
+                        logger.info("📌 's' key pressed - attempting to switch mapping...")
                         self.keyboard.switch_requested = False
                         self.switch_mapping()
                     
