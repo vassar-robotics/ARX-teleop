@@ -41,6 +41,13 @@ import time
 import threading
 from typing import Dict, List, Optional
 
+# Import select for Unix systems
+try:
+    import select
+except ImportError:
+    # Windows doesn't have select for stdin
+    select = None
+
 try:
     from pubnub.pnconfiguration import PNConfiguration
     from pubnub.pubnub import PubNub
@@ -151,6 +158,66 @@ class StatusListener(SubscribeCallback):
             self.follower_status[data.get("follower_id")] = data
             
 
+class KeyboardListener:
+    """Non-blocking keyboard input listener for mapping control."""
+    
+    def __init__(self):
+        self.switch_requested = False
+        self.stop_requested = False
+        self._listener_thread = None
+        self._running = False
+        
+    def start(self):
+        """Start the keyboard listener in a separate thread."""
+        self._running = True
+        self._listener_thread = threading.Thread(target=self._listen, daemon=True)
+        self._listener_thread.start()
+        
+    def stop(self):
+        """Stop the keyboard listener."""
+        self._running = False
+        
+    def _listen(self):
+        """Listen for keyboard input."""
+        try:
+            # For Unix-like systems (Linux, macOS)
+            import termios
+            import tty
+            
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(sys.stdin.fileno())
+                while self._running:
+                    if select and sys.stdin in select.select([sys.stdin], [], [], 0.1)[0]:
+                        key = sys.stdin.read(1)
+                        if key.lower() == 's':
+                            self.switch_requested = True
+                        elif key == '\x03':  # Ctrl+C
+                            self.stop_requested = True
+                            break
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except ImportError:
+            # Fallback for Windows
+            while self._running:
+                try:
+                    import msvcrt
+                    if msvcrt.kbhit():
+                        key = msvcrt.getch()
+                        if key.lower() == b's':
+                            self.switch_requested = True
+                        elif key == b'\x03':  # Ctrl+C
+                            self.stop_requested = True
+                            break
+                except:
+                    pass
+                time.sleep(0.1)
+        except Exception:
+            # Ultimate fallback - no keyboard support
+            logger.warning("Keyboard input not supported on this system")
+
+
 class LeaderTeleop:
     """Main teleoperation class for leader side."""
     
@@ -169,6 +236,10 @@ class LeaderTeleop:
         # Performance tracking
         self.last_publish_time = 0
         self.publish_times = []
+        
+        # Mapping control
+        self.mapping = {}  # Will be set after leaders are connected
+        self.keyboard = None
         
     def setup_pubnub(self):
         """Initialize PubNub connection."""
@@ -227,6 +298,25 @@ class LeaderTeleop:
             
         logger.info(f"{Fore.GREEN}✓ Connected to {len(self.leaders)} leader robots{Style.RESET_ALL}")
         
+        # Initialize default mapping (Leader1 -> Follower1, Leader2 -> Follower2)
+        self.mapping = {
+            "Leader1": "Follower1",
+            "Leader2": "Follower2"
+        }
+        logger.info(f"Initial mapping: Leader1 → Follower1, Leader2 → Follower2")
+        
+    def switch_mapping(self):
+        """Switch the leader-follower mapping."""
+        # Swap the assignments
+        current_followers = list(self.mapping.values())
+        self.mapping = {
+            "Leader1": current_followers[1],
+            "Leader2": current_followers[0]
+        }
+        logger.info(f"\n🔄 Mapping switched:")
+        logger.info(f"  Leader1 → {self.mapping['Leader1']}")
+        logger.info(f"  Leader2 → {self.mapping['Leader2']}")
+        
     def publish_positions(self, positions: Dict[str, Dict[int, int]]):
         """Publish position data to PubNub."""
         self.sequence += 1
@@ -270,6 +360,12 @@ class LeaderTeleop:
         print(f"Connected Leaders: {len(self.leaders)}")
         print()
         
+        # Current mapping
+        print(f"{Style.BRIGHT}Current Mapping:{Style.RESET_ALL}")
+        for leader_id, follower_id in self.mapping.items():
+            print(f"  {leader_id} → {follower_id}")
+        print()
+        
         # Network stats
         print(f"{Style.BRIGHT}Network Statistics:{Style.RESET_ALL}")
         print(f"  Average Latency: {stats['avg_latency']:.1f}ms")
@@ -292,7 +388,7 @@ class LeaderTeleop:
                 print(f"  {follower_id}: Connected, {status.get('motors_active', 0)} motors active")
                 
         print()
-        print(f"{Fore.CYAN}Press Ctrl+C to stop{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}Press 's' to switch mapping, Ctrl+C to stop{Style.RESET_ALL}")
         
     def teleoperation_loop(self):
         """Main loop reading positions and publishing."""
@@ -303,11 +399,25 @@ class LeaderTeleop:
         display_thread = threading.Thread(target=self.display_loop, daemon=True)
         display_thread.start()
         
+        # Start keyboard listener
+        self.keyboard = KeyboardListener()
+        self.keyboard.start()
+        logger.info("Keyboard listener started - press 's' to switch mapping")
+        
         logger.info(f"Starting teleoperation at {pubnub_config.TARGET_FPS} Hz...")
         
         try:
             while self.running and not shutdown_requested:
                 loop_start = time.time()
+                
+                # Check for keyboard input
+                if self.keyboard:
+                    if self.keyboard.switch_requested:
+                        self.keyboard.switch_requested = False
+                        self.switch_mapping()
+                    
+                    if self.keyboard.stop_requested:
+                        break
                 
                 # Read positions from all leaders
                 positions = {}
@@ -329,6 +439,8 @@ class LeaderTeleop:
             logger.info("\nStopping teleoperation...")
         finally:
             self.running = False
+            if self.keyboard:
+                self.keyboard.stop()
             
     def display_loop(self):
         """Separate thread for updating display."""

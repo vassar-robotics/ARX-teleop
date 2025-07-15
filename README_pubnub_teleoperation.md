@@ -316,3 +316,46 @@ RECONNECT_DELAY_S = 5  # Longer reconnect delay
 
 This implementation extends the original lerobot teleoperation system with internet capabilities.
 Maintains compatibility with Apache 2.0 license. 
+
+# Requirements
+
+- Python 3.8+
+- Two computers with internet connection
+- USB-to-TTL converters for robot connections
+- PubNub account (free tier is sufficient)
+
+## USB Permissions on Linux/Ubuntu
+
+On Linux systems, USB serial devices require special permissions. The follower script will attempt to handle this automatically, but for a permanent solution:
+
+### Quick Setup (Recommended)
+```bash
+# Run the provided setup script
+sudo chmod +x setup_usb_permissions_linux.sh
+sudo ./setup_usb_permissions_linux.sh
+```
+
+### Manual Setup
+If you prefer to set up manually:
+
+1. **Add your user to the dialout group:**
+   ```bash
+   sudo usermod -a -G dialout $USER
+   # Log out and back in for this to take effect
+   ```
+
+2. **Or create a udev rule (permanent fix):**
+   ```bash
+   # Create the rules file
+   sudo nano /etc/udev/rules.d/99-robot-usb-serial.rules
+   
+   # Add these lines:
+   SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*", MODE="0666"
+   SUBSYSTEM=="tty", KERNEL=="ttyACM[0-9]*", MODE="0666"
+   
+   # Reload rules
+   sudo udevadm control --reload-rules
+   sudo udevadm trigger
+   ```
+
+The follower script will guide you through this process if needed. 

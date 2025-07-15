@@ -36,6 +36,7 @@ import argparse
 import json
 import platform
 import signal
+import subprocess
 import sys
 import time
 import threading
@@ -64,6 +65,123 @@ except ImportError:
 # Import our modules
 import pubnub_config
 from teleoperate_multi_arms_standalone import SO101Controller, find_robot_ports, identify_robot_by_voltage
+
+
+def setup_usb_permissions_linux(ports: List[str]) -> bool:
+    """
+    Attempt to set proper permissions for USB ports on Linux.
+    Returns True if successful or not needed, False if manual intervention required.
+    """
+    if platform.system() != "Linux":
+        return True  # Not Linux, no special permissions needed
+        
+    import subprocess
+    import getpass
+    
+    needs_permission_fix = False
+    for port in ports:
+        # Check if we can access the port
+        try:
+            import serial
+            test_port = serial.Serial(port, 9600)
+            test_port.close()
+        except serial.SerialException as e:
+            if "Permission denied" in str(e) or "Errno 13" in str(e):
+                needs_permission_fix = True
+                break
+    
+    if not needs_permission_fix:
+        return True
+        
+    logger.warning(f"{Fore.YELLOW}USB ports need permission fix on Linux{Style.RESET_ALL}")
+    
+    # Check if we're running with sudo
+    if os.geteuid() == 0:
+        # Running as root, can fix permissions directly
+        for port in ports:
+            try:
+                subprocess.run(["chmod", "666", port], check=True)
+                logger.info(f"{Fore.GREEN}✓ Fixed permissions for {port}{Style.RESET_ALL}")
+            except subprocess.CalledProcessError:
+                logger.error(f"Failed to set permissions for {port}")
+                return False
+        return True
+    
+    # Not running as root, provide options
+    logger.info("\nTo fix USB permissions, you have several options:")
+    logger.info(f"\n{Style.BRIGHT}Option 1: Use the provided setup script (recommended):{Style.RESET_ALL}")
+    logger.info("  sudo ./setup_usb_permissions_linux.sh")
+    
+    logger.info(f"\n{Style.BRIGHT}Option 2: Run this script with sudo (temporary fix):{Style.RESET_ALL}")
+    logger.info(f"  sudo python {sys.argv[0]}")
+    
+    logger.info(f"\n{Style.BRIGHT}Option 3: Add user to dialout group:{Style.RESET_ALL}")
+    logger.info(f"  sudo usermod -a -G dialout {getpass.getuser()}")
+    logger.info("  Then log out and back in")
+    
+    logger.info(f"\n{Style.BRIGHT}Option 4: Create udev rule manually:{Style.RESET_ALL}")
+    logger.info("  See setup instructions below...")
+    
+    # Try to run chmod with sudo
+    logger.info(f"\n{Fore.CYAN}Attempting to fix permissions automatically...{Style.RESET_ALL}")
+    try:
+        for port in ports:
+            cmd = ["sudo", "-n", "chmod", "666", port]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info(f"{Fore.GREEN}✓ Fixed permissions for {port}{Style.RESET_ALL}")
+            else:
+                # sudo requires password
+                logger.info(f"\n{Fore.YELLOW}Manual permission fix required for {port}{Style.RESET_ALL}")
+                logger.info(f"Run: sudo chmod 666 {port}")
+                return False
+    except Exception as e:
+        logger.error(f"Error setting permissions: {e}")
+        return False
+        
+    return True
+
+
+def create_udev_rule_file():
+    """Create a udev rule file content for USB serial devices."""
+    content = """# USB Serial Device Rules for Robot Arms
+# This file allows all users to access USB serial devices
+# Created by teleoperate_follower_remote.py
+
+# For FTDI USB Serial devices (common for robot controllers)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", MODE="0666"
+
+# For CH340/CH341 USB Serial devices
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0666"
+
+# For CP210x USB Serial devices
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", MODE="0666"
+
+# For Prolific USB Serial devices
+SUBSYSTEM=="tty", ATTRS{idVendor}=="067b", MODE="0666"
+
+# Generic rule for all USB serial devices (use with caution)
+# SUBSYSTEM=="tty", SUBSYSTEMS=="usb", MODE="0666"
+"""
+    
+    filename = "99-robot-usb-serial.rules"
+    logger.info(f"\n{Style.BRIGHT}To create a permanent fix, save this as /etc/udev/rules.d/{filename}:{Style.RESET_ALL}")
+    logger.info("-" * 60)
+    print(content)
+    logger.info("-" * 60)
+    logger.info("\nThen run:")
+    logger.info("  sudo cp 99-robot-usb-serial.rules /etc/udev/rules.d/")
+    logger.info("  sudo udevadm control --reload-rules")
+    logger.info("  sudo udevadm trigger")
+    
+    # Save to current directory for convenience
+    try:
+        with open(filename, 'w') as f:
+            f.write(content)
+        logger.info(f"\n{Fore.GREEN}✓ Created {filename} in current directory{Style.RESET_ALL}")
+    except Exception as e:
+        logger.warning(f"Could not create rule file: {e}")
+
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -198,6 +316,26 @@ class FollowerTeleop:
         follower_ports = []
         
         logger.info(f"Found {len(ports)} serial ports")
+        
+        # Handle USB permissions on Linux
+        if platform.system() == "Linux" and ports:
+            if not setup_usb_permissions_linux(ports):
+                logger.warning(f"\n{Fore.YELLOW}Could not automatically fix USB permissions{Style.RESET_ALL}")
+                logger.info("You may need to run the commands shown above before continuing")
+                
+                # Ask if user wants to see udev rule
+                try:
+                    response = input(f"\n{Fore.CYAN}Would you like to create a udev rule file for permanent fix? (y/N): {Style.RESET_ALL}")
+                    if response.lower() == 'y':
+                        create_udev_rule_file()
+                except KeyboardInterrupt:
+                    pass
+                
+                # Give user time to fix permissions
+                try:
+                    input(f"\n{Fore.CYAN}Press Enter after fixing permissions to continue...{Style.RESET_ALL}")
+                except KeyboardInterrupt:
+                    raise RuntimeError("User cancelled")
         
         for port in ports:
             try:
