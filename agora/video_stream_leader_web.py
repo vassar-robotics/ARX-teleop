@@ -32,11 +32,22 @@ def index():
 @app.route('/api/config')
 def get_config():
     """Get Agora configuration."""
-    return jsonify({
+    config_data = {
         'appId': agora_config.APP_ID,
         'channels': list(agora_config.VIDEO_CHANNELS.values()),
         'videoProfile': agora_config.VIDEO_PROFILE
-    })
+    }
+    
+    # Include token if configured
+    if hasattr(agora_config, 'USE_TOKEN') and agora_config.USE_TOKEN:
+        config_data['useToken'] = True
+        config_data['token'] = agora_config.TOKEN
+        config_data['cameraUids'] = list(agora_config.CAMERA_UIDS.values())
+    else:
+        config_data['useToken'] = False
+        config_data['cameraUids'] = [None, None, None]
+        
+    return jsonify(config_data)
 
 def open_browser():
     """Open web browser after server starts."""
@@ -236,8 +247,11 @@ def main():
             isReceiving = true;
             addStatus('Starting video reception...', 'info');
             
-            // Create a client for each channel
-            for (let i = 0; i < 3; i++) {
+            // Check if all cameras use the same channel (token mode)
+            const usesSameChannel = config.channels[0] === config.channels[1] && config.channels[1] === config.channels[2];
+            
+            if (usesSameChannel && config.useToken) {
+                // Single channel mode with multiple UIDs
                 const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
                 clients.push(client);
                 
@@ -245,39 +259,97 @@ def main():
                     // Set client role to audience
                     await client.setClientRole('audience');
                     
-                    // Join channel
-                    await client.join(config.appId, config.channels[i], null, null);
-                    addStatus(`Joined channel: ${config.channels[i]}`, 'ok');
+                    // Join channel with token
+                    await client.join(config.appId, config.channels[0], config.token, null);
+                    addStatus(`Joined channel: ${config.channels[0]}`, 'ok');
+                    
+                    // Track which camera UIDs we've received
+                    const uidToCameraMap = {};
+                    config.cameraUids.forEach((uid, index) => {
+                        uidToCameraMap[uid] = index + 1;
+                    });
                     
                     // Subscribe to remote users
                     client.on('user-published', async (user, mediaType) => {
                         await client.subscribe(user, mediaType);
                         
                         if (mediaType === 'video') {
-                            const container = document.getElementById(`video-container-${i + 1}`);
-                            
-                            // Remove no signal message
-                            const noSignal = container.querySelector('.no-signal');
-                            if (noSignal) {
-                                noSignal.remove();
+                            const cameraNum = uidToCameraMap[user.uid];
+                            if (cameraNum) {
+                                const container = document.getElementById(`video-container-${cameraNum}`);
+                                
+                                // Remove no signal message
+                                const noSignal = container.querySelector('.no-signal');
+                                if (noSignal) {
+                                    noSignal.remove();
+                                }
+                                
+                                // Play video
+                                user.videoTrack.play(container);
+                                addStatus(`Receiving video from Camera ${cameraNum} (UID: ${user.uid})`, 'ok');
                             }
-                            
-                            // Play video
-                            user.videoTrack.play(container);
-                            addStatus(`Receiving video in channel ${i + 1}`, 'ok');
                         }
                     });
                     
                     client.on('user-unpublished', (user, mediaType) => {
                         if (mediaType === 'video') {
-                            const container = document.getElementById(`video-container-${i + 1}`);
-                            container.innerHTML = '<div class="video-label">Camera ' + (i + 1) + '</div><div class="no-signal">NO SIGNAL</div>';
-                            addStatus(`Lost video in channel ${i + 1}`, 'warning');
+                            const cameraNum = uidToCameraMap[user.uid];
+                            if (cameraNum) {
+                                const container = document.getElementById(`video-container-${cameraNum}`);
+                                container.innerHTML = '<div class="video-label">Camera ' + cameraNum + '</div><div class="no-signal">NO SIGNAL</div>';
+                                addStatus(`Lost video from Camera ${cameraNum}`, 'warning');
+                            }
                         }
                     });
                     
                 } catch (error) {
-                    addStatus(`Failed to join channel ${i + 1}: ${error.message}`, 'error');
+                    addStatus(`Failed to join channel: ${error.message}`, 'error');
+                }
+            } else {
+                // Multi-channel mode (original behavior)
+                for (let i = 0; i < 3; i++) {
+                    const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+                    clients.push(client);
+                    
+                    try {
+                        // Set client role to audience
+                        await client.setClientRole('audience');
+                        
+                        // Join channel with token if available
+                        const token = config.useToken ? config.token : null;
+                        await client.join(config.appId, config.channels[i], token, null);
+                        addStatus(`Joined channel: ${config.channels[i]}`, 'ok');
+                        
+                        // Subscribe to remote users
+                        client.on('user-published', async (user, mediaType) => {
+                            await client.subscribe(user, mediaType);
+                            
+                            if (mediaType === 'video') {
+                                const container = document.getElementById(`video-container-${i + 1}`);
+                                
+                                // Remove no signal message
+                                const noSignal = container.querySelector('.no-signal');
+                                if (noSignal) {
+                                    noSignal.remove();
+                                }
+                                
+                                // Play video
+                                user.videoTrack.play(container);
+                                addStatus(`Receiving video in channel ${i + 1}`, 'ok');
+                            }
+                        });
+                        
+                        client.on('user-unpublished', (user, mediaType) => {
+                            if (mediaType === 'video') {
+                                const container = document.getElementById(`video-container-${i + 1}`);
+                                container.innerHTML = '<div class="video-label">Camera ' + (i + 1) + '</div><div class="no-signal">NO SIGNAL</div>';
+                                addStatus(`Lost video in channel ${i + 1}`, 'warning');
+                            }
+                        });
+                        
+                    } catch (error) {
+                        addStatus(`Failed to join channel ${i + 1}: ${error.message}`, 'error');
+                    }
                 }
             }
         }

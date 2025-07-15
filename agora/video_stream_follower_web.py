@@ -32,11 +32,22 @@ def index():
 @app.route('/api/config')
 def get_config():
     """Get Agora configuration."""
-    return jsonify({
+    config_data = {
         'appId': agora_config.APP_ID,
         'channels': list(agora_config.VIDEO_CHANNELS.values()),
         'videoProfile': agora_config.VIDEO_PROFILE
-    })
+    }
+    
+    # Include token if configured
+    if hasattr(agora_config, 'USE_TOKEN') and agora_config.USE_TOKEN:
+        config_data['useToken'] = True
+        config_data['token'] = agora_config.TOKEN
+        config_data['cameraUids'] = list(agora_config.CAMERA_UIDS.values())
+    else:
+        config_data['useToken'] = False
+        config_data['cameraUids'] = [None, None, None]
+        
+    return jsonify(config_data)
 
 def open_browser():
     """Open web browser after server starts."""
@@ -327,9 +338,11 @@ def main():
                     // Set client role to host
                     await client.setClientRole('host');
                     
-                    // Join channel
-                    await client.join(config.appId, config.channels[i], null, null);
-                    addStatus(`Joined channel: ${config.channels[i]}`, 'ok');
+                    // Join channel with token if available
+                    const token = config.useToken ? config.token : null;
+                    const uid = config.cameraUids ? config.cameraUids[i] : null;
+                    await client.join(config.appId, config.channels[i], token, uid);
+                    addStatus(`Joined channel: ${config.channels[i]}${uid ? ' with UID: ' + uid : ''}`, 'ok');
                     
                     // Create video track
                     const videoTrack = await AgoraRTC.createCameraVideoTrack({

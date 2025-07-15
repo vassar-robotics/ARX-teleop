@@ -6,6 +6,11 @@ Agora Video Streaming Configuration
 APP_ID = "9b4dab3f30524c12b7e78bff8c83a24d"  # User's Agora App ID
 APP_CERTIFICATE = None  # Optional - for token authentication
 
+# Token Configuration for secure channels
+USE_TOKEN = True  # Set to True when using tokens
+TOKEN = "007eJxTYGC2LdS7n1NsMOMX+/YHlh5M0v9WHmFly9U1Kn23f9+hjC8KDJZJJimJScZpxgamRibJhkZJ5qnmFklpaRbJFsaJRiYpgrxlGQ2BjAx+T3YxMzJAIIjPwZBSmpijm1iUy8AAAHI1H+k="
+TOKEN_CHANNEL = "dual-arm"  # Channel name for the token
+
 # Channel Configuration
 CHANNEL_PREFIX = "robot_cam_"  # Prefix for video channels
 VIDEO_CHANNELS = {
@@ -13,6 +18,27 @@ VIDEO_CHANNELS = {
     "camera2": f"{CHANNEL_PREFIX}2", 
     "camera3": f"{CHANNEL_PREFIX}3"
 }
+
+# When using token, use the same channel but different UIDs for each camera
+if USE_TOKEN:
+    # For token-based auth, we'll use the same channel but different UIDs
+    VIDEO_CHANNELS = {
+        "camera1": TOKEN_CHANNEL,
+        "camera2": TOKEN_CHANNEL,
+        "camera3": TOKEN_CHANNEL
+    }
+    # UIDs for each camera (must be unique per channel)
+    CAMERA_UIDS = {
+        "camera1": 1001,
+        "camera2": 1002,
+        "camera3": 1003
+    }
+else:
+    CAMERA_UIDS = {
+        "camera1": None,
+        "camera2": None,
+        "camera3": None
+    }
 
 # Video Configuration - 480p @ 30fps
 VIDEO_PROFILE = {
