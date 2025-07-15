@@ -13,6 +13,12 @@ except ImportError:
     print("Please install it with: pip install agora-python-sdk")
     sys.exit(1)
 
+try:
+    import agora_config
+    DEFAULT_APP_ID = agora_config.APP_ID
+except:
+    DEFAULT_APP_ID = None
+
 
 def test_agora_connection(app_id):
     """Test basic Agora connectivity."""
@@ -105,7 +111,11 @@ def main():
     if len(sys.argv) > 1:
         app_id = sys.argv[1]
     else:
-        app_id = input("Enter your Agora App ID: ").strip()
+        if DEFAULT_APP_ID and DEFAULT_APP_ID != "YOUR_AGORA_APP_ID":
+            app_id = DEFAULT_APP_ID
+            print(f"Using App ID from agora_config.py")
+        else:
+            app_id = input("Enter your Agora App ID: ").strip()
         
     if not app_id or app_id == "YOUR_AGORA_APP_ID":
         print("Error: Please provide a valid Agora App ID")

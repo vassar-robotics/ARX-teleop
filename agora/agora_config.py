@@ -3,7 +3,7 @@ Agora Video Streaming Configuration
 """
 
 # Agora Credentials (Get these from https://console.agora.io)
-APP_ID = "YOUR_AGORA_APP_ID"  # Replace with your Agora App ID
+APP_ID = "9b4dab3f30524c12b7e78bff8c83a24d"  # User's Agora App ID
 APP_CERTIFICATE = None  # Optional - for token authentication
 
 # Channel Configuration
@@ -14,12 +14,12 @@ VIDEO_CHANNELS = {
     "camera3": f"{CHANNEL_PREFIX}3"
 }
 
-# Video Configuration
+# Video Configuration - 480p @ 30fps
 VIDEO_PROFILE = {
-    "width": 640,
-    "height": 480,
+    "width": 640,   # 480p width
+    "height": 480,  # 480p height
     "frameRate": 30,
-    "bitrate": 1000
+    "bitrate": 800  # Reduced bitrate for 480p
 }
 
 # Audio Configuration (disabled for video-only streaming)

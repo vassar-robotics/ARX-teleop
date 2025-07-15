@@ -261,14 +261,71 @@ class VideoStreamFollowerApp:
         camera_frame = ttk.LabelFrame(main_frame, text="Camera Configuration", padding="10")
         camera_frame.grid(row=4, column=0, columnspan=3, pady=10, sticky="we")
         
-        ttk.Label(camera_frame, text="Camera Indices (comma-separated):").grid(row=0, column=0, padx=5)
-        self.camera_indices_var = tk.StringVar(value="0,1,2")
-        ttk.Entry(camera_frame, textvariable=self.camera_indices_var, width=20).grid(row=0, column=1, padx=5)
+        # Detect cameras button
+        detect_button = ttk.Button(camera_frame, text="Detect Cameras", 
+                                  command=self.detect_cameras)
+        detect_button.grid(row=0, column=0, padx=5, pady=5)
+        
+        # Camera selection
+        self.camera_vars = []
+        self.camera_combos = []
+        
+        for i in range(3):
+            ttk.Label(camera_frame, text=f"Camera {i+1}:").grid(row=i+1, column=0, padx=5, pady=2)
+            var = tk.StringVar()
+            combo = ttk.Combobox(camera_frame, textvariable=var, width=40, state="readonly")
+            combo.grid(row=i+1, column=1, padx=5, pady=2)
+            self.camera_vars.append(var)
+            self.camera_combos.append(combo)
         
         # App ID entry
-        ttk.Label(camera_frame, text="Agora App ID:").grid(row=1, column=0, padx=5, pady=5)
+        ttk.Label(camera_frame, text="Agora App ID:").grid(row=4, column=0, padx=5, pady=5)
         self.app_id_var = tk.StringVar(value=agora_config.APP_ID)
-        ttk.Entry(camera_frame, textvariable=self.app_id_var, width=40, show="*").grid(row=1, column=1, padx=5)
+        app_id_entry = ttk.Entry(camera_frame, textvariable=self.app_id_var, width=40)
+        app_id_entry.grid(row=4, column=1, padx=5)
+        
+        # Initial camera detection
+        self.available_cameras = {}
+        self.detect_cameras()
+        
+    def detect_cameras(self):
+        """Detect all available cameras."""
+        self.log_status("Detecting available cameras...")
+        self.available_cameras = {}
+        
+        # Test camera indices up to 10
+        for i in range(10):
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                # Get camera properties
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = int(cap.get(cv2.CAP_PROP_FPS))
+                
+                # Try to get camera name (backend-specific)
+                backend = cap.getBackendName()
+                
+                # Create camera description
+                desc = f"Camera {i} ({width}x{height} @ {fps}fps) - {backend}"
+                self.available_cameras[desc] = i
+                
+                cap.release()
+                self.log_status(f"Found: {desc}")
+                
+        if not self.available_cameras:
+            self.log_status("No cameras detected!")
+            messagebox.showwarning("No Cameras", "No cameras were detected. Please check connections.")
+            return
+            
+        # Update combo boxes
+        camera_list = list(self.available_cameras.keys())
+        for i, combo in enumerate(self.camera_combos):
+            combo['values'] = camera_list
+            # Auto-select first available cameras
+            if i < len(camera_list):
+                combo.set(camera_list[i])
+                
+        self.log_status(f"Detected {len(self.available_cameras)} cameras")
         
     def log_status(self, message):
         """Log a status message."""
@@ -287,25 +344,31 @@ class VideoStreamFollowerApp:
             messagebox.showerror("Error", "Please enter a valid Agora App ID")
             return
             
-        # Parse camera indices
-        try:
-            indices = [int(x.strip()) for x in self.camera_indices_var.get().split(',')]
-            if len(indices) != 3:
-                raise ValueError("Need exactly 3 camera indices")
-        except Exception as e:
-            messagebox.showerror("Error", f"Invalid camera indices: {e}")
+        # Get selected cameras
+        selected_cameras = []
+        for i, var in enumerate(self.camera_vars):
+            selection = var.get()
+            if selection and selection in self.available_cameras:
+                camera_idx = self.available_cameras[selection]
+                selected_cameras.append((camera_idx, f"Camera {i+1}"))
+            else:
+                messagebox.showerror("Error", f"Please select Camera {i+1}")
+                return
+                
+        if len(selected_cameras) != 3:
+            messagebox.showerror("Error", "Please select exactly 3 cameras")
             return
             
         self.log_status("Starting video streaming...")
         
         # Initialize cameras
-        for i, idx in enumerate(indices):
-            camera = VideoCapture(idx, f"Camera {i+1}")
+        for idx, name in selected_cameras:
+            camera = VideoCapture(idx, name)
             if camera.start():
                 self.cameras.append(camera)
-                self.log_status(f"Initialized camera {i+1} (index {idx})")
+                self.log_status(f"Initialized {name} (index {idx})")
             else:
-                self.log_status(f"Failed to initialize camera {i+1} (index {idx})")
+                self.log_status(f"Failed to initialize {name} (index {idx})")
                 
         if not self.cameras:
             messagebox.showerror("Error", "No cameras could be initialized")

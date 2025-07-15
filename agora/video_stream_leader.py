@@ -260,7 +260,13 @@ class VideoStreamLeaderApp:
         # App ID entry
         ttk.Label(config_frame, text="Agora App ID:").grid(row=0, column=0, padx=5)
         self.app_id_var = tk.StringVar(value=agora_config.APP_ID)
-        ttk.Entry(config_frame, textvariable=self.app_id_var, width=40, show="*").grid(row=0, column=1, padx=5)
+        app_id_entry = ttk.Entry(config_frame, textvariable=self.app_id_var, width=40)
+        app_id_entry.grid(row=0, column=1, padx=5)
+        
+        # Show if using default App ID
+        if agora_config.APP_ID != "YOUR_AGORA_APP_ID":
+            ttk.Label(config_frame, text="✓ Using configured App ID", 
+                     foreground="green").grid(row=1, column=1, padx=5)
         
         # Recording options
         self.recording_enabled = tk.BooleanVar(value=False)
