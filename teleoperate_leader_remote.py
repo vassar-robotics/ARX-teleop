@@ -313,16 +313,22 @@ class LeaderTeleop:
         """Publish position data to PubNub."""
         self.sequence += 1
         
-        # Convert motor IDs to strings for JSON serialization
-        json_positions = {}
-        for robot_id, robot_positions in positions.items():
-            json_positions[robot_id] = {str(motor_id): int(pos) for motor_id, pos in robot_positions.items()}
+        # Apply mapping: convert Leader IDs to Follower IDs
+        mapped_positions = {}
+        for leader_id, leader_positions in positions.items():
+            # Get the mapped follower ID for this leader
+            follower_id = self.mapping.get(leader_id)
+            if follower_id:
+                # Convert motor IDs to strings for JSON serialization
+                mapped_positions[follower_id] = {str(motor_id): int(pos) for motor_id, pos in leader_positions.items()}
+            else:
+                logger.warning(f"No mapping found for {leader_id}")
         
         message = {
             "type": "telemetry",
             "timestamp": time.time(),
             "sequence": self.sequence,
-            "positions": json_positions
+            "positions": mapped_positions  # Use mapped positions
         }
         
         try:
