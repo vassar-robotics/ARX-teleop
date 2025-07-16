@@ -1,0 +1,20 @@
+# Requirements for all teleoperation and video streaming scripts
+# Generated from analysis of all Python files in the repository
+
+# Serial communication for robot control
+pyserial>=3.5
+
+# PubNub for internet-based teleoperation
+pubnub>=7.0.0
+
+# Terminal colors (optional but recommended)
+colorama>=0.4.4
+
+# Web framework for video streaming interfaces
+flask>=2.0.0
+
+# Note: scservo_sdk is included locally in the scservo_sdk directory
+# This is a copy from the official Feetech SDK (via https://github.com/Adam-Software/Feetech-Servo-SDK)
+
+# Optional dependencies (automatically handled by scripts if not installed):
+# - webbrowser (built-in Python module) 
