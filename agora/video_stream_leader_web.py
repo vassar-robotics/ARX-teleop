@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
 Agora Video Streaming - Leader Side (Web-based)
-Web interface to receive and display 3 video feeds from Agora channels
+Web interface to receive and display video feeds from Agora channels
+Supports dynamic number of cameras (up to 4)
 """
 
 import os
 import sys
 from flask import Flask, render_template, jsonify
 import logging
-import webbrowser
-from threading import Timer
+import subprocess
 
 # Add parent directory to path to import agora_config
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,6 +24,27 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# Global variable to track if we're in headless mode
+HEADLESS_MODE = False
+
+def check_headless():
+    """Check if running in headless mode."""
+    global HEADLESS_MODE
+    # Check for DISPLAY environment variable
+    if not os.environ.get('DISPLAY'):
+        HEADLESS_MODE = True
+        logger.info("Running in headless mode")
+        return True
+    
+    # Check if we can import and use webbrowser
+    try:
+        import webbrowser
+        return False
+    except:
+        HEADLESS_MODE = True
+        logger.info("Running in headless mode (no webbrowser module)")
+        return True
+
 @app.route('/')
 def index():
     """Serve the main video display page."""
@@ -32,28 +53,51 @@ def index():
 @app.route('/api/config')
 def get_config():
     """Get Agora configuration."""
+    # Get channels configuration
+    if hasattr(agora_config, 'VIDEO_CHANNELS'):
+        channels = list(agora_config.VIDEO_CHANNELS.values())
+    else:
+        # Default to 4 channels if not specified
+        channels = [f"robot-video-{i+1}" for i in range(4)]
+    
     config_data = {
         'appId': agora_config.APP_ID,
-        'channels': list(agora_config.VIDEO_CHANNELS.values()),
-        'videoProfile': agora_config.VIDEO_PROFILE
+        'channels': channels,
+        'videoProfile': agora_config.VIDEO_PROFILE,
+        'numChannels': len(channels)
     }
     
     # Include token if configured
     if hasattr(agora_config, 'USE_TOKEN') and agora_config.USE_TOKEN:
         config_data['useToken'] = True
         config_data['token'] = agora_config.TOKEN
-        config_data['cameraUids'] = list(agora_config.CAMERA_UIDS.values())
+        
+        # Get camera UIDs
+        if hasattr(agora_config, 'CAMERA_UIDS'):
+            camera_uids = list(agora_config.CAMERA_UIDS.values())
+        else:
+            camera_uids = [1000 + i for i in range(len(channels))]
+        
+        config_data['cameraUids'] = camera_uids
     else:
         config_data['useToken'] = False
-        config_data['cameraUids'] = [None, None, None]
+        config_data['cameraUids'] = [None] * len(channels)
         
     return jsonify(config_data)
 
 def open_browser():
-    """Open web browser after server starts."""
-    webbrowser.open('http://127.0.0.1:5001')
+    """Open web browser after server starts (only if not headless)."""
+    if not HEADLESS_MODE:
+        try:
+            import webbrowser
+            webbrowser.open('http://127.0.0.1:5001')
+        except Exception as e:
+            logger.warning(f"Could not open browser: {e}")
 
 def main():
+    # Check if running headless
+    check_headless()
+    
     # Create templates directory if it doesn't exist
     template_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(template_dir, exist_ok=True)
@@ -109,6 +153,16 @@ def main():
             border-radius: 4px;
             font-size: 14px;
         }
+        .channel-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
         .no-signal {
             display: flex;
             align-items: center;
@@ -153,11 +207,23 @@ def main():
         .status-ok { color: #4CAF50; }
         .status-error { color: #f44336; }
         .status-warning { color: #ff9800; }
+        .info-panel {
+            background-color: #e3f2fd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            border: 1px solid #2196f3;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Robot Video Feeds - Leader</h1>
+        
+        <div class="info-panel">
+            <h3>Channel Configuration</h3>
+            <div id="channel-info">Loading configuration...</div>
+        </div>
         
         <div class="controls">
             <button id="startBtn" onclick="startReceiving()">Start Receiving</button>
@@ -165,22 +231,8 @@ def main():
             <button id="recordBtn" onclick="toggleRecording()" disabled>Start Recording</button>
         </div>
         
-        <div class="video-grid">
-            <div class="video-container" id="video-container-1">
-                <div class="video-label">Camera 1</div>
-                <div class="no-signal">NO SIGNAL</div>
-            </div>
-            <div class="video-container" id="video-container-2">
-                <div class="video-label">Camera 2</div>
-                <div class="no-signal">NO SIGNAL</div>
-            </div>
-            <div class="video-container" id="video-container-3">
-                <div class="video-label">Camera 3</div>
-                <div class="no-signal">NO SIGNAL</div>
-            </div>
-            <div class="video-container">
-                <!-- Empty slot -->
-            </div>
+        <div class="video-grid" id="video-grid">
+            <!-- Video containers will be dynamically created -->
         </div>
         
         <div class="status">
@@ -203,7 +255,29 @@ def main():
             try {
                 const response = await fetch('/api/config');
                 config = await response.json();
+                
+                // Update channel info
+                const infoDiv = document.getElementById('channel-info');
+                infoDiv.innerHTML = `Configured for ${config.numChannels} channel(s): ${config.channels.join(', ')}`;
+                
+                // Create video containers dynamically
+                const videoGrid = document.getElementById('video-grid');
+                videoGrid.innerHTML = '';
+                
+                for (let i = 0; i < config.numChannels; i++) {
+                    const container = document.createElement('div');
+                    container.className = 'video-container';
+                    container.id = `video-container-${i}`;
+                    container.innerHTML = `
+                        <div class="video-label">Camera ${i + 1}</div>
+                        <div class="channel-info">Channel: ${config.channels[i]}</div>
+                        <div class="no-signal">NO SIGNAL</div>
+                    `;
+                    videoGrid.appendChild(container);
+                }
+                
                 addStatus('Configuration loaded', 'ok');
+                addStatus(`Ready to receive from ${config.numChannels} channel(s)`, 'ok');
             } catch (error) {
                 addStatus('Failed to load configuration: ' + error.message, 'error');
             }
@@ -248,7 +322,7 @@ def main():
             addStatus('Starting video reception...', 'info');
             
             // Check if all cameras use the same channel (token mode)
-            const usesSameChannel = config.channels[0] === config.channels[1] && config.channels[1] === config.channels[2];
+            const usesSameChannel = config.channels.every(ch => ch === config.channels[0]);
             
             if (usesSameChannel && config.useToken) {
                 // Single channel mode with multiple UIDs
@@ -266,7 +340,9 @@ def main():
                     // Track which camera UIDs we've received
                     const uidToCameraMap = {};
                     config.cameraUids.forEach((uid, index) => {
-                        uidToCameraMap[uid] = index + 1;
+                        if (uid !== null) {
+                            uidToCameraMap[uid] = index;
+                        }
                     });
                     
                     // Subscribe to remote users
@@ -275,7 +351,7 @@ def main():
                         
                         if (mediaType === 'video') {
                             const cameraNum = uidToCameraMap[user.uid];
-                            if (cameraNum) {
+                            if (cameraNum !== undefined) {
                                 const container = document.getElementById(`video-container-${cameraNum}`);
                                 
                                 // Remove no signal message
@@ -286,7 +362,22 @@ def main():
                                 
                                 // Play video
                                 user.videoTrack.play(container);
-                                addStatus(`Receiving video from Camera ${cameraNum} (UID: ${user.uid})`, 'ok');
+                                addStatus(`Receiving video from Camera ${cameraNum + 1} (UID: ${user.uid})`, 'ok');
+                            } else {
+                                // Unknown UID, try to find an empty slot
+                                for (let i = 0; i < config.numChannels; i++) {
+                                    const container = document.getElementById(`video-container-${i}`);
+                                    if (container && container.querySelector('.no-signal')) {
+                                        const noSignal = container.querySelector('.no-signal');
+                                        if (noSignal) {
+                                            noSignal.remove();
+                                        }
+                                        user.videoTrack.play(container);
+                                        addStatus(`Receiving video from unknown UID ${user.uid} in slot ${i + 1}`, 'warning');
+                                        uidToCameraMap[user.uid] = i;
+                                        break;
+                                    }
+                                }
                             }
                         }
                     });
@@ -294,10 +385,14 @@ def main():
                     client.on('user-unpublished', (user, mediaType) => {
                         if (mediaType === 'video') {
                             const cameraNum = uidToCameraMap[user.uid];
-                            if (cameraNum) {
+                            if (cameraNum !== undefined) {
                                 const container = document.getElementById(`video-container-${cameraNum}`);
-                                container.innerHTML = '<div class="video-label">Camera ' + cameraNum + '</div><div class="no-signal">NO SIGNAL</div>';
-                                addStatus(`Lost video from Camera ${cameraNum}`, 'warning');
+                                container.innerHTML = `
+                                    <div class="video-label">Camera ${cameraNum + 1}</div>
+                                    <div class="channel-info">Channel: ${config.channels[0]}</div>
+                                    <div class="no-signal">NO SIGNAL</div>
+                                `;
+                                addStatus(`Lost video from Camera ${cameraNum + 1}`, 'warning');
                             }
                         }
                     });
@@ -307,7 +402,7 @@ def main():
                 }
             } else {
                 // Multi-channel mode (original behavior)
-                for (let i = 0; i < 3; i++) {
+                for (let i = 0; i < config.numChannels; i++) {
                     const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
                     clients.push(client);
                     
@@ -325,7 +420,7 @@ def main():
                             await client.subscribe(user, mediaType);
                             
                             if (mediaType === 'video') {
-                                const container = document.getElementById(`video-container-${i + 1}`);
+                                const container = document.getElementById(`video-container-${i}`);
                                 
                                 // Remove no signal message
                                 const noSignal = container.querySelector('.no-signal');
@@ -335,20 +430,24 @@ def main():
                                 
                                 // Play video
                                 user.videoTrack.play(container);
-                                addStatus(`Receiving video in channel ${i + 1}`, 'ok');
+                                addStatus(`Receiving video in channel ${config.channels[i]}`, 'ok');
                             }
                         });
                         
                         client.on('user-unpublished', (user, mediaType) => {
                             if (mediaType === 'video') {
-                                const container = document.getElementById(`video-container-${i + 1}`);
-                                container.innerHTML = '<div class="video-label">Camera ' + (i + 1) + '</div><div class="no-signal">NO SIGNAL</div>';
-                                addStatus(`Lost video in channel ${i + 1}`, 'warning');
+                                const container = document.getElementById(`video-container-${i}`);
+                                container.innerHTML = `
+                                    <div class="video-label">Camera ${i + 1}</div>
+                                    <div class="channel-info">Channel: ${config.channels[i]}</div>
+                                    <div class="no-signal">NO SIGNAL</div>
+                                `;
+                                addStatus(`Lost video in channel ${config.channels[i]}`, 'warning');
                             }
                         });
                         
                     } catch (error) {
-                        addStatus(`Failed to join channel ${i + 1}: ${error.message}`, 'error');
+                        addStatus(`Failed to join channel ${config.channels[i]}: ${error.message}`, 'error');
                     }
                 }
             }
@@ -371,10 +470,20 @@ def main():
             for (let i = 0; i < clients.length; i++) {
                 try {
                     await clients[i].leave();
-                    const container = document.getElementById(`video-container-${i + 1}`);
-                    container.innerHTML = '<div class="video-label">Camera ' + (i + 1) + '</div><div class="no-signal">NO SIGNAL</div>';
                 } catch (error) {
                     console.error('Error leaving channel:', error);
+                }
+            }
+            
+            // Reset all video containers
+            for (let i = 0; i < config.numChannels; i++) {
+                const container = document.getElementById(`video-container-${i}`);
+                if (container) {
+                    container.innerHTML = `
+                        <div class="video-label">Camera ${i + 1}</div>
+                        <div class="channel-info">Channel: ${config.channels[i]}</div>
+                        <div class="no-signal">NO SIGNAL</div>
+                    `;
                 }
             }
             
@@ -418,8 +527,13 @@ def main():
     logger.info("Video Stream Leader (Web) ready")
     logger.info(f"Using Agora App ID: {agora_config.APP_ID[:8]}...")
     
-    # Open browser after a short delay
-    Timer(1.5, open_browser).start()
+    if HEADLESS_MODE:
+        logger.info("Running in headless mode - browser will not open automatically")
+        logger.info("Please open http://127.0.0.1:5001 in a web browser")
+    else:
+        # Only import and use webbrowser if not headless
+        from threading import Timer
+        Timer(1.5, open_browser).start()
     
     # Run Flask app
     app.run(host='127.0.0.1', port=5001, debug=False)

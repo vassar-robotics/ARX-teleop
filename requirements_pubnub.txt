@@ -1,5 +1,0 @@
-# PubNub teleoperation requirements
-pubnub>=7.0.0
-colorama>=0.4.6
-pyserial>=3.5
-scservo_sdk  # Install from Feetech SDK 
