@@ -249,17 +249,72 @@ class HeadlessAgoraStreamer:
         possible_paths = [
             '/usr/bin/chromium-browser',
             '/usr/bin/chromium',
+            '/usr/bin/chromium-bsu',
             '/usr/bin/google-chrome',
             '/usr/bin/google-chrome-stable',
-            '/snap/bin/chromium'
+            '/snap/bin/chromium',
+            '/usr/local/bin/chromium',
+            '/opt/chromium/chromium',
+            # Add common ARM paths
+            '/usr/lib/chromium-browser/chromium-browser',
+            '/usr/lib/chromium/chromium'
         ]
         
+        # Also check PATH
+        for cmd in ['chromium-browser', 'chromium', 'chromium-bsu', 'google-chrome']:
+            try:
+                import shutil
+                path = shutil.which(cmd)
+                if path:
+                    logger.info(f"Found Chrome binary in PATH: {path}")
+                    return path
+            except:
+                pass
+        
+        # Check hardcoded paths
         for path in possible_paths:
             if os.path.exists(path):
                 logger.info(f"Found Chrome binary at: {path}")
                 return path
                 
-        raise Exception("Chrome/Chromium binary not found. Please install Chromium browser.")
+        # Provide more helpful error message
+        error_msg = """Chrome/Chromium binary not found. Please install it using one of:
+        - sudo apt-get install chromium
+        - sudo apt-get install chromium-bsu
+        - sudo snap install chromium
+        - Or check the installation guide in README_HEADLESS.md"""
+        raise Exception(error_msg)
+        
+    def find_chromedriver(self):
+        """Find ChromeDriver binary on the system"""
+        possible_paths = [
+            '/usr/bin/chromedriver',
+            '/usr/local/bin/chromedriver',
+            '/usr/lib/chromium-browser/chromedriver',
+            '/usr/lib/chromium/chromedriver',
+            '/snap/bin/chromium.chromedriver',
+            # Common ARM paths
+            '/usr/lib/chromium-browser/chromedriver',
+            '/usr/lib/aarch64-linux-gnu/chromium-browser/chromedriver'
+        ]
+        
+        # Check PATH first
+        try:
+            import shutil
+            path = shutil.which('chromedriver')
+            if path:
+                logger.info(f"Found ChromeDriver in PATH: {path}")
+                return path
+        except:
+            pass
+            
+        # Check hardcoded paths
+        for path in possible_paths:
+            if os.path.exists(path):
+                logger.info(f"Found ChromeDriver at: {path}")
+                return path
+                
+        return None
         
     def start_streaming(self, camera_index=0):
         """Start streaming from specified camera"""
@@ -276,9 +331,34 @@ class HeadlessAgoraStreamer:
             chrome_binary = self.find_chrome_binary()
             options.binary_location = chrome_binary
             
+            # Find ChromeDriver
+            chromedriver_path = self.find_chromedriver()
+            
             # Create driver
             logger.info("Launching headless Chrome...")
-            self.driver = webdriver.Chrome(options=options)
+            if chromedriver_path:
+                # Use specific ChromeDriver path
+                from selenium.webdriver.chrome.service import Service
+                service = Service(chromedriver_path)
+                self.driver = webdriver.Chrome(service=service, options=options)
+            else:
+                # Try default (relies on PATH or selenium-manager)
+                try:
+                    self.driver = webdriver.Chrome(options=options)
+                except Exception as e:
+                    # Provide detailed error message
+                    error_msg = f"""Failed to create Chrome driver: {str(e)}
+                    
+Please ensure ChromeDriver is installed:
+- sudo apt-get install chromium-driver
+- Or download from: https://chromedriver.chromium.org/
+
+For ARM devices, use the distro package:
+- sudo apt-get install chromium-driver
+
+ChromeDriver should match your Chrome version.
+Run 'chromium --version' and 'chromedriver --version' to check."""
+                    raise Exception(error_msg)
             
             # Set timeouts
             self.driver.set_page_load_timeout(30)
