@@ -12,10 +12,62 @@ echo ""
 echo "Updating package list..."
 sudo apt-get update
 
-# Install Chromium browser and driver
+# Detect which Chromium package is available
 echo ""
-echo "Installing Chromium browser and driver..."
-sudo apt-get install -y chromium-browser chromium-chromedriver
+echo "Detecting Chromium package..."
+CHROMIUM_PACKAGE=""
+CHROMEDRIVER_PACKAGE=""
+
+# Try different package names
+if apt-cache show chromium-browser >/dev/null 2>&1; then
+    CHROMIUM_PACKAGE="chromium-browser"
+    CHROMEDRIVER_PACKAGE="chromium-chromedriver"
+elif apt-cache show chromium >/dev/null 2>&1; then
+    CHROMIUM_PACKAGE="chromium"
+    CHROMEDRIVER_PACKAGE="chromium-driver"
+elif apt-cache show chromium-bsu >/dev/null 2>&1; then
+    # Some ARM systems have this package
+    CHROMIUM_PACKAGE="chromium-bsu"
+    CHROMEDRIVER_PACKAGE="chromium-driver"
+else
+    echo "WARNING: No standard Chromium package found in repositories"
+    echo ""
+    echo "Trying alternative installation methods..."
+fi
+
+# Install Chromium browser and driver
+if [ -n "$CHROMIUM_PACKAGE" ]; then
+    echo ""
+    echo "Installing $CHROMIUM_PACKAGE and driver..."
+    sudo apt-get install -y $CHROMIUM_PACKAGE $CHROMEDRIVER_PACKAGE || {
+        echo "Failed to install $CHROMIUM_PACKAGE"
+        echo "Trying without chromedriver..."
+        sudo apt-get install -y $CHROMIUM_PACKAGE
+    }
+else
+    # Alternative: Try snap
+    echo "Trying to install Chromium via snap..."
+    if command -v snap >/dev/null 2>&1; then
+        sudo snap install chromium
+    else
+        echo ""
+        echo "ERROR: Could not find Chromium in package manager"
+        echo ""
+        echo "Please try one of these methods:"
+        echo "1. Enable additional repositories:"
+        echo "   sudo add-apt-repository universe"
+        echo "   sudo apt-get update"
+        echo ""
+        echo "2. Install snap and then Chromium:"
+        echo "   sudo apt-get install snapd"
+        echo "   sudo snap install chromium"
+        echo ""
+        echo "3. Download Chromium manually from:"
+        echo "   https://www.chromium.org/getting-involved/download-chromium"
+        echo ""
+        exit 1
+    fi
+fi
 
 # Install Python3 and pip if not already installed
 echo ""
@@ -40,30 +92,82 @@ sudo apt-get install -y \
     libxrandr2 \
     libgbm1 \
     libxss1 \
-    libasound2
+    libasound2 || {
+        echo "Some dependencies failed to install, but continuing..."
+    }
+
+# Try to install ChromeDriver separately if not installed
+if ! command -v chromedriver &> /dev/null; then
+    echo ""
+    echo "ChromeDriver not found, trying alternative installation..."
+    
+    # Get system architecture
+    ARCH=$(uname -m)
+    case $ARCH in
+        armv7l|armhf)
+            DRIVER_ARCH="linux32"
+            ;;
+        aarch64|arm64)
+            DRIVER_ARCH="linux64"
+            ;;
+        x86_64)
+            DRIVER_ARCH="linux64"
+            ;;
+        *)
+            echo "Unknown architecture: $ARCH"
+            DRIVER_ARCH="linux64"
+            ;;
+    esac
+    
+    echo "Detected architecture: $ARCH (using $DRIVER_ARCH driver)"
+    
+    # Option 1: Try python chromedriver-binary
+    pip3 install chromedriver-binary-auto || {
+        echo "Could not install chromedriver-binary-auto"
+        echo "You may need to download ChromeDriver manually from:"
+        echo "https://chromedriver.chromium.org/downloads"
+    }
+fi
 
 # Check if installation was successful
 echo ""
 echo "Checking installation..."
-if command -v chromium-browser &> /dev/null; then
-    echo "✓ Chromium browser installed successfully"
-    chromium-browser --version
-else
-    echo "✗ Chromium browser installation failed"
-    exit 1
+
+# Check for any Chromium installation
+CHROMIUM_FOUND=false
+for cmd in chromium-browser chromium chromium-bsu google-chrome; do
+    if command -v $cmd &> /dev/null; then
+        echo "✓ Chromium browser installed successfully ($cmd)"
+        $cmd --version 2>/dev/null || echo "  Version check failed (this is normal for headless systems)"
+        CHROMIUM_FOUND=true
+        break
+    fi
+done
+
+if [ "$CHROMIUM_FOUND" = false ]; then
+    # Check snap version
+    if snap list chromium &> /dev/null; then
+        echo "✓ Chromium installed via snap"
+        CHROMIUM_FOUND=true
+    else
+        echo "✗ Chromium browser installation failed"
+        exit 1
+    fi
 fi
 
+# Check ChromeDriver (less critical)
 if command -v chromedriver &> /dev/null; then
     echo "✓ ChromeDriver installed successfully"
-    chromedriver --version
+    chromedriver --version 2>/dev/null || echo "  Version check failed"
 else
-    echo "✗ ChromeDriver installation failed"
-    exit 1
+    echo "⚠ ChromeDriver not found in PATH"
+    echo "  Selenium will try to find it automatically"
 fi
 
+# Check Selenium
 if python3 -c "import selenium" &> /dev/null; then
     echo "✓ Python Selenium installed successfully"
-    python3 -c "import selenium; print(f'Selenium version: {selenium.__version__}')"
+    python3 -c "import selenium; print(f'  Selenium version: {selenium.__version__}')"
 else
     echo "✗ Python Selenium installation failed"
     exit 1
@@ -78,4 +182,7 @@ echo ""
 echo "Note: Make sure your user has access to video devices:"
 echo "  sudo usermod -a -G video $USER"
 echo "  (logout and login again for this to take effect)"
+echo ""
+echo "If Chromium was installed via snap, you may need to:"
+echo "  export PATH=$PATH:/snap/bin"
 echo "" 

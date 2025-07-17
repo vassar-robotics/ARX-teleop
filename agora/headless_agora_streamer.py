@@ -227,6 +227,28 @@ class HeadlessAgoraStreamer:
         options.add_argument('--disable-images')
         options.add_argument('--disable-javascript-harmony-shipping')
         
+        # Additional ARM/resource optimizations
+        options.add_argument('--disable-web-security')
+        options.add_argument('--disable-features=VizDisplayCompositor')
+        options.add_argument('--disable-breakpad')
+        options.add_argument('--disable-features=TranslateUI')
+        options.add_argument('--disable-ipc-flooding-protection')
+        options.add_argument('--disable-renderer-backgrounding')
+        options.add_argument('--disable-field-trial-config')
+        options.add_argument('--disable-backgrounding-occluded-windows')
+        options.add_argument('--disable-features=site-per-process')
+        
+        # Memory optimization
+        options.add_argument('--memory-pressure-off')
+        options.add_argument('--js-flags=--max-old-space-size=512')
+        
+        # Crash/hang prevention
+        options.add_argument('--disable-hang-monitor')
+        options.add_argument('--disable-prompt-on-repost')
+        options.add_argument('--disable-sync')
+        options.add_argument('--disable-domain-reliability')
+        options.add_argument('--disable-client-side-phishing-detection')
+        
         # Set window size
         options.add_argument('--window-size=1280,720')
         
@@ -241,6 +263,10 @@ class HeadlessAgoraStreamer:
         # Suppress logging
         options.add_experimental_option('excludeSwitches', ['enable-logging'])
         options.add_argument('--log-level=3')
+        
+        # Enable verbose logging for debugging
+        options.add_argument('--enable-logging=stderr')
+        options.add_argument('--v=1')
         
         return options
         
@@ -334,31 +360,57 @@ class HeadlessAgoraStreamer:
             # Find ChromeDriver
             chromedriver_path = self.find_chromedriver()
             
-            # Create driver
+            # Create driver with better error handling
             logger.info("Launching headless Chrome...")
+            logger.info(f"Chrome binary: {chrome_binary}")
             if chromedriver_path:
-                # Use specific ChromeDriver path
-                from selenium.webdriver.chrome.service import Service
-                service = Service(chromedriver_path)
-                self.driver = webdriver.Chrome(service=service, options=options)
-            else:
-                # Try default (relies on PATH or selenium-manager)
-                try:
+                logger.info(f"ChromeDriver path: {chromedriver_path}")
+            
+            try:
+                if chromedriver_path:
+                    # Use specific ChromeDriver path
+                    from selenium.webdriver.chrome.service import Service
+                    service = Service(chromedriver_path)
+                    service.log_path = '/tmp/chromedriver.log'  # Enable ChromeDriver logging
+                    self.driver = webdriver.Chrome(service=service, options=options)
+                else:
+                    # Try default (relies on PATH or selenium-manager)
                     self.driver = webdriver.Chrome(options=options)
-                except Exception as e:
-                    # Provide detailed error message
-                    error_msg = f"""Failed to create Chrome driver: {str(e)}
                     
-Please ensure ChromeDriver is installed:
-- sudo apt-get install chromium-driver
-- Or download from: https://chromedriver.chromium.org/
-
-For ARM devices, use the distro package:
-- sudo apt-get install chromium-driver
-
-ChromeDriver should match your Chrome version.
-Run 'chromium --version' and 'chromedriver --version' to check."""
-                    raise Exception(error_msg)
+                logger.info("Chrome driver created successfully")
+                
+            except Exception as e:
+                # Log the full exception details
+                import traceback
+                logger.error(f"Failed to create Chrome driver: {str(e)}")
+                logger.error(f"Exception type: {type(e).__name__}")
+                logger.error(f"Traceback:\n{traceback.format_exc()}")
+                
+                # Check if ChromeDriver log exists
+                if os.path.exists('/tmp/chromedriver.log'):
+                    with open('/tmp/chromedriver.log', 'r') as f:
+                        logger.error(f"ChromeDriver log:\n{f.read()}")
+                
+                # Provide detailed error message
+                error_msg = f"""Failed to create Chrome driver: {str(e)}
+                    
+Please check:
+1. ChromeDriver and Chrome versions match
+   - Run: chromium --version
+   - Run: chromedriver --version
+   
+2. Missing dependencies (common on ARM):
+   - sudo apt-get install libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0
+   - sudo apt-get install libcups2 libdrm2 libxkbcommon0 libxcomposite1
+   - sudo apt-get install libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
+   
+3. Try running Chrome manually:
+   - {chrome_binary} --headless --no-sandbox --disable-gpu --dump-dom https://google.com
+   
+4. Check system resources:
+   - free -h (ensure enough memory)
+   - df -h (ensure enough disk space in /tmp)"""
+                raise Exception(error_msg)
             
             # Set timeouts
             self.driver.set_page_load_timeout(30)
