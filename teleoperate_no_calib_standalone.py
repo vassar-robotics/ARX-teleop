@@ -115,79 +115,171 @@ class SO101Controller:
         self.connected = False
         
     def read_voltage(self) -> float:
-        """Read voltage from the first motor."""
+        """Read voltage from the first motor with retry logic."""
         motor_id = self.motor_ids[0]
-        try:
-            read_result = self.packet_handler.read1ByteTxRx(
-                self.port_handler, motor_id, self.PRESENT_VOLTAGE)
-            
-            # Handle different return formats
-            if len(read_result) >= 3:
-                raw_voltage, result, error = read_result
-            elif len(read_result) == 2:
-                raw_voltage, result = read_result
-                error = 0
-            else:
-                raise RuntimeError(f"Unexpected read result format: {read_result}")
-            
-            if result != self.scs.COMM_SUCCESS:
-                raise RuntimeError(f"Failed to read voltage: {self.packet_handler.getTxRxResult(result)}")
-                
-            # Feetech motors report voltage in units of 0.1V
-            return raw_voltage / 10.0
-        except Exception as e:
-            raise RuntimeError(f"Failed to read voltage from motor {motor_id}: {str(e)}")
+        max_retries = 5
         
-    def read_positions(self) -> Dict[int, int]:
-        """Read current positions from all motors."""
-        positions = {}
-        for motor_id in self.motor_ids:
+        for attempt in range(max_retries):
             try:
-                read_result = self.packet_handler.read2ByteTxRx(
-                    self.port_handler, motor_id, self.PRESENT_POSITION)
+                read_result = self.packet_handler.read1ByteTxRx(
+                    self.port_handler, motor_id, self.PRESENT_VOLTAGE)
                 
                 # Handle different return formats
                 if len(read_result) >= 3:
-                    position, result, error = read_result
+                    raw_voltage, result, error = read_result
                 elif len(read_result) == 2:
-                    position, result = read_result
+                    raw_voltage, result = read_result
                     error = 0
                 else:
-                    logger.warning(f"Unexpected read result format from motor {motor_id}: {read_result}")
-                    continue
-                    
+                    raise RuntimeError(f"Unexpected read result format: {read_result}")
+                
                 if result == self.scs.COMM_SUCCESS:
-                    positions[motor_id] = position
+                    # Feetech motors report voltage in units of 0.1V
+                    return raw_voltage / 10.0
                 else:
-                    logger.warning(f"Failed to read position from motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Failed to read voltage from motor {motor_id} (attempt {attempt + 1}/{max_retries}): {self.packet_handler.getTxRxResult(result)}")
+                        time.sleep(0.01)  # Small delay before retry
+                        continue
+                    
             except Exception as e:
-                logger.warning(f"Exception reading position from motor {motor_id}: {e}")
+                if attempt < max_retries - 1:
+                    logger.warning(f"Exception reading voltage from motor {motor_id} (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                    time.sleep(0.01)
+                    continue
+        
+        # All retries failed
+        raise RuntimeError(f"Failed to read voltage from motor {motor_id} after {max_retries} attempts")
+        
+    def read_positions(self) -> Dict[int, int]:
+        """Read current positions from all motors with retry logic."""
+        positions = {}
+        max_retries = 50
+        
+        for motor_id in self.motor_ids:
+            for attempt in range(max_retries):
+                try:
+                    read_result = self.packet_handler.read2ByteTxRx(
+                        self.port_handler, motor_id, self.PRESENT_POSITION)
+                    
+                    # Handle different return formats
+                    if len(read_result) >= 3:
+                        position, result, error = read_result
+                    elif len(read_result) == 2:
+                        position, result = read_result
+                        error = 0
+                    else:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Unexpected read result format from motor {motor_id} (attempt {attempt + 1}/{max_retries}): {read_result}")
+                            time.sleep(0.01)
+                            continue
+                        else:
+                            raise RuntimeError(f"Unexpected read result format from motor {motor_id}: {read_result}")
+                    
+                    if result == self.scs.COMM_SUCCESS:
+                        positions[motor_id] = position
+                        break  # Success, move to next motor
+                    else:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Failed to read position from motor {motor_id} (attempt {attempt + 1}/{max_retries}): {self.packet_handler.getTxRxResult(result)}")
+                            time.sleep(0.01)
+                            continue
+                        else:
+                            raise RuntimeError(f"Failed to read position from motor {motor_id} after {max_retries} attempts")
+                            
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Exception reading position from motor {motor_id} (attempt {attempt + 1}/{max_retries}): {e}")
+                        time.sleep(0.01)
+                        continue
+                    else:
+                        raise RuntimeError(f"Failed to read position from motor {motor_id} after {max_retries} attempts: {str(e)}")
+                        
         return positions
         
     def write_positions(self, positions: Dict[int, int]) -> None:
-        """Write goal positions to motors."""
+        """Write goal positions to motors with retry logic."""
+        max_retries = 50
+        
         for motor_id, position in positions.items():
             # Clamp position to valid range
             position = max(0, min(self.resolution - 1, position))
             
-            result, error = self.packet_handler.write2ByteTxRx(
-                self.port_handler, motor_id, self.GOAL_POSITION, position)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to write position to motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+            for attempt in range(max_retries):
+                try:
+                    result, error = self.packet_handler.write2ByteTxRx(
+                        self.port_handler, motor_id, self.GOAL_POSITION, position)
+                    
+                    if result == self.scs.COMM_SUCCESS:
+                        break  # Success, move to next motor
+                    else:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Failed to write position to motor {motor_id} (attempt {attempt + 1}/{max_retries}): {self.packet_handler.getTxRxResult(result)}")
+                            time.sleep(0.01)
+                            continue
+                        else:
+                            raise RuntimeError(f"Failed to write position to motor {motor_id} after {max_retries} attempts")
+                            
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Exception writing position to motor {motor_id} (attempt {attempt + 1}/{max_retries}): {e}")
+                        time.sleep(0.01)
+                        continue
+                    else:
+                        raise RuntimeError(f"Failed to write position to motor {motor_id} after {max_retries} attempts: {str(e)}")
                 
     def enable_torque(self) -> None:
-        """Enable torque on all motors."""
+        """Enable torque on all motors with retry logic."""
+        max_retries = 5
+        
         for motor_id in self.motor_ids:
-            result, error = self.packet_handler.write1ByteTxRx(
-                self.port_handler, motor_id, self.TORQUE_ENABLE, 1)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to enable torque on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
-                
+            # Enable torque
+            for attempt in range(max_retries):
+                try:
+                    result, error = self.packet_handler.write1ByteTxRx(
+                        self.port_handler, motor_id, self.TORQUE_ENABLE, 1)
+                    
+                    if result == self.scs.COMM_SUCCESS:
+                        break
+                    else:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Failed to enable torque on motor {motor_id} (attempt {attempt + 1}/{max_retries}): {self.packet_handler.getTxRxResult(result)}")
+                            time.sleep(0.01)
+                            continue
+                        else:
+                            raise RuntimeError(f"Failed to enable torque on motor {motor_id} after {max_retries} attempts")
+                            
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Exception enabling torque on motor {motor_id} (attempt {attempt + 1}/{max_retries}): {e}")
+                        time.sleep(0.01)
+                        continue
+                    else:
+                        raise RuntimeError(f"Failed to enable torque on motor {motor_id} after {max_retries} attempts: {str(e)}")
+            
             # Set Lock to 1 (locked)
-            result, error = self.packet_handler.write1ByteTxRx(
-                self.port_handler, motor_id, self.LOCK, 1)
-            if result != self.scs.COMM_SUCCESS:
-                logger.warning(f"Failed to set lock on motor {motor_id}: {self.packet_handler.getTxRxResult(result)}")
+            for attempt in range(max_retries):
+                try:
+                    result, error = self.packet_handler.write1ByteTxRx(
+                        self.port_handler, motor_id, self.LOCK, 1)
+                    
+                    if result == self.scs.COMM_SUCCESS:
+                        break
+                    else:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Failed to set lock on motor {motor_id} (attempt {attempt + 1}/{max_retries}): {self.packet_handler.getTxRxResult(result)}")
+                            time.sleep(0.01)
+                            continue
+                        else:
+                            raise RuntimeError(f"Failed to set lock on motor {motor_id} after {max_retries} attempts")
+                            
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Exception setting lock on motor {motor_id} (attempt {attempt + 1}/{max_retries}): {e}")
+                        time.sleep(0.01)
+                        continue
+                    else:
+                        raise RuntimeError(f"Failed to set lock on motor {motor_id} after {max_retries} attempts: {str(e)}")
 
 
 def identify_robot_by_voltage(port: str, motor_ids: List[int]) -> tuple[bool, float]:
@@ -353,8 +445,8 @@ def teleoperation_loop(leader: SO101Controller, follower: SO101Controller,
 
 def main():
     parser = argparse.ArgumentParser(description="Standalone teleoperation for SO101 robots with STS3215 servos")
-    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6",
-                       help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6)")
+    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7,8",
+                       help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6,7,8)")
     parser.add_argument("--leader_port", type=str,
                        help="Serial port for leader robot (5V)")
     parser.add_argument("--follower_port", type=str,

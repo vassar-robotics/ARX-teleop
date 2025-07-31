@@ -397,8 +397,8 @@ def set_middle_position(bus: FeetechBus) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Set Feetech servo motors to their middle position")
-    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6",
-                       help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6)")
+    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7,8",
+                       help="Comma-separated list of motor IDs (default: 1,2,3,4,5,6,7,8)")
     parser.add_argument("--port", type=str,
                        help="Serial port (e.g., /dev/ttyUSB0, COM3)")
     parser.add_argument("--motor_model", type=str, default="sts3215",

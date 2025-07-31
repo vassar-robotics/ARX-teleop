@@ -8,7 +8,7 @@ APP_CERTIFICATE = None  # Optional - for token authentication
 
 # Token Configuration for secure channels
 USE_TOKEN = True  # Set to True when using tokens
-TOKEN = "007eJxTYGC2LdS7n1NsMOMX+/YHlh5M0v9WHmFly9U1Kn23f9+hjC8KDJZJJimJScZpxgamRibJhkZJ5qnmFklpaRbJFsaJRiYpgrxlGQ2BjAx+T3YxMzJAIIjPwZBSmpijm1iUy8AAAHI1H+k="
+TOKEN = "007eJxTYDj9WfnDEtNr226y3FL7waZ3WlBdRLFDxWULU8LbvbVWyjcUGCyTTFISk4zTjA1MjUySDY2SzFPNLZLS0iySLYwTjUxSXHd1ZzQEMjL0HjnBxMgAgSA+B0NKaWKObmJRLgMDAMZjIQk="
 TOKEN_CHANNEL = "dual-arm"  # Channel name for the token
 
 # Channel Configuration
