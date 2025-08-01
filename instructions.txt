@@ -3,5 +3,8 @@ Current Agora credentials are based on nate@vassarrobotics.com agora account. Th
 Project Name: teleop-stream-1
 App ID: d1b381fe495547cc867a343c1eceef5d
 Primary Certificate: db2813337e8b46bcb271cd544f19bd63
-Temp Token Channel Name:
-Temp Token (ID?):
+Temp Token Channel Name: nate-rnd-250801
+Temp Token: 007eJxTYJDtrJx+4bSolsfi82c525m+m86doGN+c6ZLbpecAUd41goFhhTDJGMLw7RUE0tTUxPz5GQLM/NEYxPjZMPU5NTUNNMUL9vejIZARgZd3mUMjFAI4vMz5CWWpOoW5aXoGpkaWBgYMjAAAAsIH8Y=
+
+
+- Tokens expire - regenerate if you get "CAN_NOT_GET_GATEWAY_SERVER" errors
