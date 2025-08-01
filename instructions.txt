@@ -1,1 +1,7 @@
-Test instructions by Nate.
+Agora setup info:
+Current Agora credentials are based on nate@vassarrobotics.com agora account. They should be (as of 250801):
+Project Name: teleop-stream-1
+App ID: d1b381fe495547cc867a343c1eceef5d
+Primary Certificate: db2813337e8b46bcb271cd544f19bd63
+Temp Token Channel Name:
+Temp Token (ID?):
