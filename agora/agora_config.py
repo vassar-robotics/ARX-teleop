@@ -3,12 +3,12 @@ Agora Video Streaming Configuration
 """
 
 # Agora Credentials (Get these from https://console.agora.io)
-APP_ID = "9b4dab3f30524c12b7e78bff8c83a24d"  # User's Agora App ID
-APP_CERTIFICATE = None  # Optional - for token authentication
+APP_ID = "d1b381fe495547cc867a343c1eceef5d"  # User's Agora App ID
+APP_CERTIFICATE = "db2813337e8b46bcb271cd544f19bd63"  # Primary certificate
 
 # Token Configuration for secure channels
 USE_TOKEN = True  # Set to True when using tokens
-TOKEN = "007eJxTYDj9WfnDEtNr226y3FL7waZ3WlBdRLFDxWULU8LbvbVWyjcUGCyTTFISk4zTjA1MjUySDY2SzFPNLZLS0iySLYwTjUxSXHd1ZzQEMjL0HjnBxMgAgSA+B0NKaWKObmJRLgMDAMZjIQk="
+TOKEN = "007eJxTYJDtrJx+4bSolsfi82c525m+m86doGN+c6ZLbpecAUd41goFhhTDJGMLw7RUE0tTUxPz5GQLM/NEYxPjZMPU5NTUNNMUL9vejIZARgZd3mUMjFAI4vMz5CWWpOoW5aXoGpkaWBgYMjAAAAsIH8Y="
 TOKEN_CHANNEL = "dual-arm"  # Channel name for the token
 
 # Channel Configuration
