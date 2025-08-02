@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Video Streaming - Follower</title>
+    <script src="https://cdn.agora.io/sdk/release/AgoraRTC_N-4.20.0.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .video-container {
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            width: 800px;
+            height: 600px;
+            margin: 20px auto;
+        }
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .video-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            z-index: 10;
+        }
+        .camera-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 10;
+        }
+        .no-signal {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+            font-size: 18px;
+            background-color: #222;
+        }
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 0 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status-item {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .status-ok { color: #4CAF50; }
+        .status-error { color: #f44336; }
+        .status-warning { color: #ff9800; }
+        .info-panel {
+            background-color: #e3f2fd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            border: 1px solid #2196f3;
+        }
+        .camera-selector {
+            text-align: center;
+            margin: 20px 0;
+        }
+        select {
+            padding: 8px 12px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            background-color: white;
+            margin: 0 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Robot Video Streaming - Follower</h1>
+        
+        <div class="info-panel">
+            <div id="camera-info-text">Cameras Detected: Loading...</div>
+        </div>
+        
+        <div class="camera-selector">
+            <label for="camera-select">Select Camera:</label>
+            <select id="camera-select" onchange="onCameraChange()" disabled>
+                <option value="">No cameras available</option>
+            </select>
+        </div>
+        
+        <div class="controls">
+            <button id="startBtn" onclick="startStreaming()" disabled>Start Streaming</button>
+            <button id="stopBtn" onclick="stopStreaming()" disabled>Stop Streaming</button>
+            <button id="refreshBtn" onclick="refreshCameras()">Refresh Cameras</button>
+        </div>
+        
+        <div class="video-container" id="video-container">
+            <div class="video-label" id="video-label">No Camera Selected</div>
+            <div class="camera-info" id="camera-info">Ready</div>
+            <div class="no-signal" id="no-signal">NO CAMERA</div>
+        </div>
+        
+        <div class="status">
+            <h3>Status</h3>
+            <div id="status-messages"></div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Agora
+        AgoraRTC.setLogLevel(1);
+        
+        let config = null;
+        let client = null;
+        let localTrack = null;
+        let isStreaming = false;
+        let selectedCameraIndex = null;
+        let availableDevices = [];
+        let latencyInterval = null;
+        
+        function addStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status-messages');
+            const timestamp = new Date().toLocaleTimeString();
+            const statusClass = type === 'ok' ? 'status-ok' : 
+                               type === 'error' ? 'status-error' : 
+                               'status-warning';
+            
+            const entry = document.createElement('div');
+            entry.className = 'status-item ' + statusClass;
+            entry.textContent = `[${timestamp}] ${message}`;
+            statusDiv.appendChild(entry);
+            
+            // Keep only last 10 messages
+            while (statusDiv.children.length > 10) {
+                statusDiv.removeChild(statusDiv.firstChild);
+            }
+            
+            // Auto-scroll to bottom
+            statusDiv.scrollTop = statusDiv.scrollHeight;
+        }
+        
+        // Load configuration and setup UI
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                config = await response.json();
+                
+                // Populate camera dropdown
+                await populateCameraDropdown();
+                
+                addStatus('Configuration loaded', 'ok');
+            } catch (error) {
+                addStatus('Failed to load configuration: ' + error.message, 'error');
+            }
+        }
+        
+        async function populateCameraDropdown() {
+            try {
+                // Get camera permissions first
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                stream.getTracks().forEach(track => track.stop());
+                
+                // Get available devices
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                availableDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                const select = document.getElementById('camera-select');
+                const infoDiv = document.getElementById('camera-info-text');
+                select.innerHTML = '';
+                
+                if (availableDevices.length === 0) {
+                    select.innerHTML = '<option value="">No cameras available</option>';
+                    select.disabled = true;
+                    document.getElementById('startBtn').disabled = true;
+                    infoDiv.innerHTML = 'Cameras Detected: None';
+                } else {
+                    select.innerHTML = '<option value="">Select a camera...</option>';
+                    availableDevices.forEach((device, index) => {
+                        const option = document.createElement('option');
+                        option.value = index;
+                        option.textContent = device.label || `Camera ${index + 1}`;
+                        select.appendChild(option);
+                    });
+                    select.disabled = false;
+                    
+                    // Update info with detected cameras
+                    const cameraNames = availableDevices.map(device => 
+                        device.label || 'Unknown Camera'
+                    );
+                    infoDiv.innerHTML = `Cameras Detected: ${cameraNames.join(', ')}`;
+                    
+                    // Auto-select first camera if only one available
+                    if (availableDevices.length === 1) {
+                        select.value = '0';
+                        onCameraChange();
+                    }
+                }
+                
+                addStatus(`Browser detected ${availableDevices.length} video device(s)`, 'info');
+            } catch (error) {
+                addStatus('Failed to access cameras: ' + error.message, 'error');
+                const select = document.getElementById('camera-select');
+                const infoDiv = document.getElementById('camera-info-text');
+                select.innerHTML = '<option value="">Camera access denied</option>';
+                select.disabled = true;
+                document.getElementById('startBtn').disabled = true;
+                infoDiv.innerHTML = 'Cameras Detected: Access denied';
+            }
+        }
+        
+        function onCameraChange() {
+            const select = document.getElementById('camera-select');
+            const selectedIndex = select.value;
+            
+            if (selectedIndex === '') {
+                selectedCameraIndex = null;
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('video-label').textContent = 'No Camera Selected';
+                document.getElementById('camera-info').textContent = 'Ready';
+            } else {
+                selectedCameraIndex = parseInt(selectedIndex);
+                document.getElementById('startBtn').disabled = false;
+                const device = availableDevices[selectedCameraIndex];
+                document.getElementById('video-label').textContent = device.label || `Camera ${selectedCameraIndex + 1}`;
+                document.getElementById('camera-info').textContent = `Channel: ${config.channels[0]}`;
+                
+                // If currently streaming, switch to new camera
+                if (isStreaming) {
+                    switchCamera();
+                }
+            }
+        }
+        
+        async function startStreaming() {
+            if (!config || selectedCameraIndex === null) {
+                addStatus('Please select a camera first', 'error');
+                return;
+            }
+            
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('refreshBtn').disabled = true;
+            document.getElementById('camera-select').disabled = true;
+            
+            isStreaming = true;
+            addStatus('Starting video streaming...', 'info');
+            
+            try {
+                // Create Agora client
+                client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+                await client.setClientRole('host');
+                
+                // Join channel
+                const token = config.useToken ? config.token : null;
+                const uid = config.cameraUids ? config.cameraUids[0] : null;
+                await client.join(config.appId, config.channels[0], token, uid);
+                addStatus(`Joined channel: ${config.channels[0]}${uid ? ' with UID: ' + uid : ''}`, 'ok');
+                
+                // Start sending periodic timestamps for latency measurement
+                startLatencyPing();
+                
+                // Create and start video stream
+                await createVideoStream();
+                
+            } catch (error) {
+                addStatus(`Failed to start streaming: ${error.message}`, 'error');
+                stopStreaming();
+            }
+        }
+        
+        async function createVideoStream() {
+            try {
+                // Stop existing track if any
+                if (localTrack) {
+                    localTrack.stop();
+                    localTrack.close();
+                }
+                
+                // Create new video track
+                const device = availableDevices[selectedCameraIndex];
+                localTrack = await AgoraRTC.createCameraVideoTrack({
+                    cameraId: device.deviceId,
+                    encoderConfig: {
+                        width: config.videoProfile.width,
+                        height: config.videoProfile.height,
+                        frameRate: config.videoProfile.fps,
+                        bitrateMax: config.videoProfile.bitrate
+                    }
+                });
+                
+                // Display local video
+                const container = document.getElementById('video-container');
+                const noSignal = document.getElementById('no-signal');
+                if (noSignal) {
+                    noSignal.style.display = 'none';
+                }
+                localTrack.play(container);
+                
+                // Publish video track
+                if (client) {
+                    await client.publish([localTrack]);
+                    addStatus(`Streaming ${device.label || 'Camera'} to channel ${config.channels[0]}`, 'ok');
+                }
+                
+            } catch (error) {
+                addStatus(`Failed to create video stream: ${error.message}`, 'error');
+                throw error;
+            }
+        }
+        
+        async function switchCamera() {
+            if (!isStreaming || !client || selectedCameraIndex === null) return;
+            
+            addStatus('Switching camera...', 'info');
+            
+            try {
+                // Unpublish current track
+                if (localTrack) {
+                    await client.unpublish([localTrack]);
+                }
+                
+                // Create new video stream
+                await createVideoStream();
+                
+            } catch (error) {
+                addStatus(`Failed to switch camera: ${error.message}`, 'error');
+            }
+        }
+        
+        async function stopStreaming() {
+            isStreaming = false;
+            
+            document.getElementById('startBtn').disabled = selectedCameraIndex === null;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('refreshBtn').disabled = false;
+            document.getElementById('camera-select').disabled = false;
+            
+            addStatus('Stopping video streaming...', 'info');
+            
+            // Stop latency ping
+            stopLatencyPing();
+            
+            // Stop and close track
+            if (localTrack) {
+                localTrack.stop();
+                localTrack.close();
+                localTrack = null;
+            }
+            
+            // Leave channel
+            if (client) {
+                try {
+                    await client.leave();
+                } catch (error) {
+                    console.error('Error leaving channel:', error);
+                }
+                client = null;
+            }
+            
+            // Reset video container
+            const container = document.getElementById('video-container');
+            container.innerHTML = `
+                <div class="video-label" id="video-label">${selectedCameraIndex !== null ? availableDevices[selectedCameraIndex].label || 'Camera' : 'No Camera Selected'}</div>
+                <div class="camera-info" id="camera-info">${selectedCameraIndex !== null ? 'Channel: ' + config.channels[0] : 'Ready'}</div>
+                <div class="no-signal" id="no-signal">NO CAMERA</div>
+            `;
+            
+            addStatus('Video streaming stopped', 'ok');
+        }
+        
+        function startLatencyPing() {
+            // Send timestamp every 2 seconds for latency measurement
+            latencyInterval = setInterval(() => {
+                if (client && isStreaming) {
+                    try {
+                        const timestamp = Date.now();
+                        client.sendStreamMessage(`latency_ping:${timestamp}`);
+                    } catch (error) {
+                        console.log('Failed to send latency ping:', error);
+                    }
+                }
+            }, 2000);
+        }
+        
+        function stopLatencyPing() {
+            if (latencyInterval) {
+                clearInterval(latencyInterval);
+                latencyInterval = null;
+            }
+        }
+        
+        async function refreshCameras() {
+            addStatus('Refreshing camera list...', 'info');
+            await loadConfig();
+        }
+        
+        // Initialize on page load
+        window.addEventListener('load', async () => {
+            await loadConfig();
+        });
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (isStreaming) {
+                stopStreaming();
+            }
+        });
+        
+        // Handle device changes
+        navigator.mediaDevices.addEventListener('devicechange', async () => {
+            if (!isStreaming) {
+                addStatus('Camera configuration changed, refreshing...', 'info');
+                await loadConfig();
+            }
+        });
+    </script>
+</body>
+</html>

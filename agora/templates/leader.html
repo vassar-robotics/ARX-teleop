@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Video Feeds - Leader</title>
+    <script src="https://cdn.agora.io/sdk/release/AgoraRTC_N-4.20.0.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .video-container {
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            width: 800px;
+            height: 600px;
+            margin: 20px auto;
+        }
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .video-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            z-index: 10;
+        }
+        .camera-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 10;
+        }
+        .no-signal {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+            font-size: 18px;
+            background-color: #222;
+        }
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 0 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status-item {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .status-ok { color: #4CAF50; }
+        .status-error { color: #f44336; }
+        .status-warning { color: #ff9800; }
+        .info-panel {
+            background-color: #e3f2fd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            border: 1px solid #2196f3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Robot Video Feeds - Leader</h1>
+        
+        <div class="info-panel">
+            <h3>Connection Information</h3>
+            <div id="channel-info">Loading configuration...</div>
+            <div id="latency-info" style="margin-top: 10px; font-weight: bold;">Network Latency: Measuring...</div>
+        </div>
+        
+        <div class="controls">
+            <button id="startBtn" onclick="startReceiving()">Start Receiving</button>
+            <button id="stopBtn" onclick="stopReceiving()" disabled>Stop Receiving</button>
+            <button id="recordBtn" onclick="toggleRecording()" disabled>Start Recording</button>
+        </div>
+        
+        <div class="video-container" id="video-container">
+            <div class="video-label" id="video-label">Waiting for Stream</div>
+            <div class="camera-info" id="camera-info">Ready</div>
+            <div class="no-signal" id="no-signal">NO SIGNAL</div>
+        </div>
+        
+        <div class="status">
+            <h3>Status</h3>
+            <div id="status-messages"></div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Agora
+        AgoraRTC.setLogLevel(1);
+        
+        let config = null;
+        let client = null;
+        let isReceiving = false;
+        let isRecording = false;
+        let currentLatency = null;
+        
+        function addStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status-messages');
+            const timestamp = new Date().toLocaleTimeString();
+            const statusClass = type === 'ok' ? 'status-ok' : 
+                               type === 'error' ? 'status-error' : 
+                               'status-warning';
+            
+            const entry = document.createElement('div');
+            entry.className = 'status-item ' + statusClass;
+            entry.textContent = `[${timestamp}] ${message}`;
+            statusDiv.appendChild(entry);
+            
+            // Keep only last 10 messages
+            while (statusDiv.children.length > 10) {
+                statusDiv.removeChild(statusDiv.firstChild);
+            }
+            
+            // Auto-scroll to bottom
+            statusDiv.scrollTop = statusDiv.scrollHeight;
+        }
+        
+        function updateLatencyDisplay() {
+            const latencyDiv = document.getElementById('latency-info');
+            if (currentLatency !== null) {
+                const color = currentLatency < 100 ? '#4CAF50' : currentLatency < 300 ? '#ff9800' : '#f44336';
+                latencyDiv.innerHTML = `<span style="color: ${color};">Network Latency: ${currentLatency}ms</span>`;
+            } else if (isReceiving) {
+                latencyDiv.innerHTML = 'Network Latency: Measuring...';
+            } else {
+                latencyDiv.innerHTML = 'Network Latency: Disconnected';
+            }
+        }
+        
+        // Load configuration
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                config = await response.json();
+                
+                // Update channel info
+                const infoDiv = document.getElementById('channel-info');
+                infoDiv.innerHTML = `Configured to receive from channel: ${config.channels[0]}`;
+                
+                document.getElementById('camera-info').textContent = `Channel: ${config.channels[0]}`;
+                
+                addStatus('Configuration loaded', 'ok');
+                addStatus(`Ready to receive from channel: ${config.channels[0]}`, 'ok');
+                
+                // Initialize latency display
+                updateLatencyDisplay();
+            } catch (error) {
+                addStatus('Failed to load configuration: ' + error.message, 'error');
+            }
+        }
+        
+        async function startReceiving() {
+            if (!config) {
+                await loadConfig();
+            }
+            
+            if (!config || !config.appId) {
+                addStatus('Invalid configuration', 'error');
+                return;
+            }
+            
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('recordBtn').disabled = false;
+            
+            isReceiving = true;
+            addStatus('Starting video reception...', 'info');
+            
+            try {
+                // Create Agora client
+                client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+                await client.setClientRole('audience');
+                
+                // Join channel
+                const token = config.useToken ? config.token : null;
+                await client.join(config.appId, config.channels[0], token, null);
+                addStatus(`Joined channel: ${config.channels[0]}`, 'ok');
+                
+                // Subscribe to remote users
+                client.on('user-published', async (user, mediaType) => {
+                    await client.subscribe(user, mediaType);
+                    
+                    if (mediaType === 'video') {
+                        const container = document.getElementById('video-container');
+                        
+                        // Remove no signal message
+                        const noSignal = document.getElementById('no-signal');
+                        if (noSignal) {
+                            noSignal.style.display = 'none';
+                        }
+                        
+                        // Play video
+                        user.videoTrack.play(container);
+                        document.getElementById('video-label').textContent = 'Receiving Video';
+                        addStatus(`Receiving video from UID: ${user.uid}`, 'ok');
+                    }
+                });
+                
+                // Listen for latency ping messages
+                client.on('stream-message', (uid, data) => {
+                    try {
+                        const message = data.toString();
+                        if (message.startsWith('latency_ping:')) {
+                            const timestamp = parseInt(message.split(':')[1]);
+                            const now = Date.now();
+                            currentLatency = now - timestamp;
+                            updateLatencyDisplay();
+                        }
+                    } catch (error) {
+                        console.log('Failed to process stream message:', error);
+                    }
+                });
+                
+                client.on('user-unpublished', (user, mediaType) => {
+                    if (mediaType === 'video') {
+                        const container = document.getElementById('video-container');
+                        container.innerHTML = `
+                            <div class="video-label" id="video-label">Waiting for Stream</div>
+                            <div class="camera-info" id="camera-info">Channel: ${config.channels[0]}</div>
+                            <div class="no-signal" id="no-signal">NO SIGNAL</div>
+                        `;
+                        addStatus('Video stream ended', 'warning');
+                    }
+                });
+                
+            } catch (error) {
+                addStatus(`Failed to start receiving: ${error.message}`, 'error');
+                stopReceiving();
+            }
+        }
+        
+        async function stopReceiving() {
+            isReceiving = false;
+            
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('recordBtn').disabled = true;
+            
+            if (isRecording) {
+                toggleRecording();
+            }
+            
+            addStatus('Stopping video reception...', 'info');
+            
+            // Leave channel
+            if (client) {
+                try {
+                    await client.leave();
+                } catch (error) {
+                    console.error('Error leaving channel:', error);
+                }
+                client = null;
+            }
+            
+            // Reset video container
+            const container = document.getElementById('video-container');
+            container.innerHTML = `
+                <div class="video-label" id="video-label">Waiting for Stream</div>
+                <div class="camera-info" id="camera-info">Channel: ${config ? config.channels[0] : 'Ready'}</div>
+                <div class="no-signal" id="no-signal">NO SIGNAL</div>
+            `;
+            
+            addStatus('Video reception stopped', 'ok');
+            
+            // Reset latency display
+            currentLatency = null;
+            updateLatencyDisplay();
+        }
+        
+        function toggleRecording() {
+            isRecording = !isRecording;
+            const btn = document.getElementById('recordBtn');
+            
+            if (isRecording) {
+                btn.textContent = 'Stop Recording';
+                addStatus('Recording started (feature not implemented)', 'warning');
+            } else {
+                btn.textContent = 'Start Recording';
+                addStatus('Recording stopped', 'info');
+            }
+        }
+        
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            loadConfig();
+        });
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (isReceiving) {
+                stopReceiving();
+            }
+        });
+    </script>
+</body>
+</html>
