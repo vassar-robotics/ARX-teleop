@@ -1,0 +1,4 @@
+# Git LFS tracking for binary files
+arx_control/lib/**/*.so filter=lfs diff=lfs merge=lfs -text
+arx_control/lib/**/*.dylib filter=lfs diff=lfs merge=lfs -text
+arx_control/lib/**/*.dll filter=lfs diff=lfs merge=lfs -text
