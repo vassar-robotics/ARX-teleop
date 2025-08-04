@@ -5,7 +5,7 @@ This module provides a minimal, streamlined interface for controlling ARX R5 rob
 
 ## Contents
 
-- single_arm.py: Main SingleArm class for robot control
+- single_arm.py: Main ARXArm class for robot control
 - __init__.py: Module initialization and library loading
 - setup_env.sh: Environment setup script for library paths
 - X5liteaa0.urdf: Robot description for X5lite arm (type=0)
@@ -13,7 +13,7 @@ This module provides a minimal, streamlined interface for controlling ARX R5 rob
 
 ## Key Features
 
-- Clean SingleArm class wrapping the C++ ARX library
+- Clean ARXArm class wrapping the C++ ARX library
 - Quaternion ↔ Euler angle conversion utilities
 - End-effector pose control (position + orientation)
 - Joint position control
@@ -30,14 +30,14 @@ This module provides a minimal, streamlined interface for controlling ARX R5 rob
 
 2. Initialize the arm:
    ```python
-   from arx_control import SingleArm
+   from arx_control import ARXArm
    
    config = {
        "can_port": "can0",  # Your CAN interface
        "type": 1,           # 1 for R5, 0 for X5lite
    }
    
-   arm = SingleArm(config)
+   arm = ARXArm(config)
    ```
 
 3. Control the arm:

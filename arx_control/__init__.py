@@ -22,6 +22,6 @@ for path in lib_paths:
         sys.path.insert(0, path)
 
 # Import the main classes
-from .single_arm import SingleArm
+from .single_arm import ARXArm
 
-__all__ = ['SingleArm']
+__all__ = ['ARXArm']
