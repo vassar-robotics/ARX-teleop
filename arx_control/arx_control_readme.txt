@@ -62,7 +62,7 @@ This module provides a minimal, streamlined interface for controlling ARX R5 rob
 
 ## Dependencies
 
-- The compiled ARX R5 libraries (from arx_local_control_example)
+- The compiled ARX R5 libraries (included in arx_control/lib/)
 - numpy for array operations
 - Properly configured CAN interface
 
@@ -83,7 +83,14 @@ The module includes error handling for:
 
 ## Notes
 
-- This module depends on the compiled libraries in arx_local_control_example/
-- Make sure to run setup_env.sh before using the module
+- The ARX libraries are included in arx_control/lib/ (no external dependencies)
+- Use run_keyboard_control.sh for quick start or setup_env.sh for manual setup
 - The arm must be physically connected and the CAN interface configured
 - Use gravity compensation mode for manual manipulation
+
+## Library Structure
+
+The ARX libraries are organized in arx_control/lib/:
+- lib/arx_r5_python/: Python binding modules
+- lib/arx_r5_src/: Core shared libraries  
+- lib/libkinematic_solver.so: Kinematics library

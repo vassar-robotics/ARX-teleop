@@ -17,30 +17,36 @@ ARX via Keyboard Control:
 - ARX R5 arm connected via CAN adapter and powered on
 - Python 3 with numpy installed
 - CAN interface tools installed (`sudo apt install can-utils`)
-- ARX libraries built in arx_local_control_example/
+- ARX libraries available (included in arx_control/lib/)
 
 ## Quick Start
 
 ### 1. Set up CAN interface
 ```bash
 # Find your CAN adapter device (usually /dev/ttyACM0 or /dev/ttyACM1)
-ls /dev/tty.*
+ls /dev/ttyACM*
 
 # Set up CAN interface (replace /dev/ttyACM0 with your device)
-sudo slcand -o -f -s8 /dev/tty.usbmodemSN234567892 can0
-sudo ifconfig can0 up
+sudo slcand -o -f -s8 /dev/ttyACM2 can0
+sudo ip link set can0 up
 ```
 
-### 2. Build ARX libraries (if not already done)
-```bash
-cd arx_local_control_example/ARX_R5_python
-./build.sh
-```
+### 2. ARX libraries are pre-built
+The ARX libraries are already included in `arx_control/lib/`. No build step required!
 
 ### 3. Set up environment and run
+
+#### Option A: Use the provided launcher script (recommended)
+```bash
+# Simply run the launcher script which handles all environment setup
+./run_keyboard_control.sh
+```
+
+#### Option B: Manual setup
 ```bash
 # Set up library paths
-source arx_control/setup_env.sh
+export LD_LIBRARY_PATH=/home/vassar/code/ARX-teleop/arx_control/lib/arx_r5_src:$LD_LIBRARY_PATH
+export PYTHONPATH=/home/vassar/code/ARX-teleop/arx_control/lib/arx_r5_python:$PYTHONPATH
 
 # Run keyboard control
 python3 test_arx_via_keyboard.py
@@ -72,10 +78,14 @@ Once the program is running, use these keys to control the arm:
 
 ## Troubleshooting
 
-- **Import errors**: Make sure to source arx_control/setup_env.sh and build the libraries
+- **Import errors**: 
+  - If you get "Failed to import arx_r5_python", check that the libraries exist in `arx_control/lib/`
+  - Use the provided `run_keyboard_control.sh` script which sets all paths correctly
+  - Or manually set: `export LD_LIBRARY_PATH=/home/vassar/code/ARX-teleop/arx_control/lib/arx_r5_src:$LD_LIBRARY_PATH`
 - **CAN connection errors**: Check CAN interface with `ip link show can0`
 - **Movement errors**: Try gravity compensation mode first with 'i'
 - **Permission errors**: You may need sudo for CAN interface setup
+- **ifconfig not found**: Use `sudo ip link set can0 up` instead of `sudo ifconfig can0 up`
 
 ## Configuration
 

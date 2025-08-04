@@ -259,8 +259,8 @@ def main():
     except ImportError as e:
         print(f"Import error: {e}")
         print("Make sure to:")
-        print("1. Build the ARX libraries (cd arx_local_control_example/ARX_R5_python && ./build.sh)")
-        print("2. Source the environment setup (source arx_control/setup_env.sh)")
+        print("1. Run ./run_keyboard_control.sh which sets up the environment")
+        print("2. Or manually set: export LD_LIBRARY_PATH=/home/vassar/code/ARX-teleop/arx_control/lib/arx_r5_src:$LD_LIBRARY_PATH")
         print("3. Set up the CAN interface")
         
     except Exception as e:
