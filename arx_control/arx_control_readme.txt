@@ -5,7 +5,7 @@ This module provides a minimal, streamlined interface for controlling ARX R5 rob
 
 ## Contents
 
-- single_arm.py: Main ARXArm class for robot control
+- arxarm.py: Main ARXArm class for robot control
 - __init__.py: Module initialization and library loading
 - setup_env.sh: Environment setup script for library paths
 - X5liteaa0.urdf: Robot description for X5lite arm (type=0)

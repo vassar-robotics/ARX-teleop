@@ -64,10 +64,10 @@ def keyboard_control(stdscr):
         
         # Get current arm state for display
         try:
-            ee_pose = single_arm.get_ee_pose_xyzrpy()
-            joint_pos = single_arm.get_joint_positions()
-            joint_vel = single_arm.get_joint_velocities()
-            joint_curr = single_arm.get_joint_currents()
+            ee_pose = arm.get_ee_pose_xyzrpy()
+            joint_pos = arm.get_joint_positions()
+            joint_vel = arm.get_joint_velocities()
+            joint_curr = arm.get_joint_currents()
             
             # Display current state
             stdscr.addstr(0, 0, f"EE_POSE: [{' '.join([f'{val:.3f}' for val in ee_pose])}]")
@@ -90,8 +90,8 @@ def keyboard_control(stdscr):
             pass
         elif key == ord('i'):  # Gravity compensation
             try:
-                single_arm.gravity_compensation()
-                xyzrpy = single_arm.get_ee_pose_xyzrpy()  # Update current pose
+                arm.gravity_compensation()
+                xyzrpy = arm.get_ee_pose_xyzrpy()  # Update current pose
                 stdscr.addstr(14, 0, "Gravity compensation enabled")
             except Exception as e:
                 stdscr.addstr(14, 0, f"Error enabling gravity compensation: {e}")
@@ -99,7 +99,7 @@ def keyboard_control(stdscr):
         elif key == ord('r'):  # Go home
             try:
                 xyzrpy = np.zeros(6)
-                single_arm.go_home()
+                arm.go_home()
                 stdscr.addstr(14, 0, "Going to home position")
             except Exception as e:
                 stdscr.addstr(14, 0, f"Error going home: {e}")
@@ -108,7 +108,7 @@ def keyboard_control(stdscr):
         elif key == ord('w'):  # Forward
             xyzrpy[0] += linear_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Movement error: {e}")
                 xyzrpy[0] -= linear_step  # Revert
@@ -116,7 +116,7 @@ def keyboard_control(stdscr):
         elif key == ord('s'):  # Backward
             xyzrpy[0] -= linear_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Movement error: {e}")
                 xyzrpy[0] += linear_step  # Revert
@@ -124,7 +124,7 @@ def keyboard_control(stdscr):
         elif key == ord('a'):  # Left
             xyzrpy[1] += linear_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Movement error: {e}")
                 xyzrpy[1] -= linear_step  # Revert
@@ -132,7 +132,7 @@ def keyboard_control(stdscr):
         elif key == ord('d'):  # Right
             xyzrpy[1] -= linear_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Movement error: {e}")
                 xyzrpy[1] += linear_step  # Revert
@@ -140,7 +140,7 @@ def keyboard_control(stdscr):
         elif key == curses.KEY_UP:  # Up
             xyzrpy[2] += linear_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Movement error: {e}")
                 xyzrpy[2] -= linear_step  # Revert
@@ -148,7 +148,7 @@ def keyboard_control(stdscr):
         elif key == curses.KEY_DOWN:  # Down
             xyzrpy[2] -= linear_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Movement error: {e}")
                 xyzrpy[2] += linear_step  # Revert
@@ -156,7 +156,7 @@ def keyboard_control(stdscr):
         elif key == curses.KEY_LEFT:  # Also left
             xyzrpy[1] += linear_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Movement error: {e}")
                 xyzrpy[1] -= linear_step  # Revert
@@ -164,7 +164,7 @@ def keyboard_control(stdscr):
         elif key == curses.KEY_RIGHT:  # Also right
             xyzrpy[1] -= linear_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Movement error: {e}")
                 xyzrpy[1] += linear_step  # Revert
@@ -173,7 +173,7 @@ def keyboard_control(stdscr):
         elif key == ord(','):  # Yaw positive
             xyzrpy[5] += angular_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Rotation error: {e}")
                 xyzrpy[5] -= angular_step  # Revert
@@ -181,7 +181,7 @@ def keyboard_control(stdscr):
         elif key == ord('/'):  # Yaw negative
             xyzrpy[5] -= angular_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Rotation error: {e}")
                 xyzrpy[5] += angular_step  # Revert
@@ -189,7 +189,7 @@ def keyboard_control(stdscr):
         elif key == ord('m'):  # Roll positive
             xyzrpy[3] += angular_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Rotation error: {e}")
                 xyzrpy[3] -= angular_step  # Revert
@@ -197,7 +197,7 @@ def keyboard_control(stdscr):
         elif key == ord('n'):  # Roll negative
             xyzrpy[3] -= angular_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Rotation error: {e}")
                 xyzrpy[3] += angular_step  # Revert
@@ -205,7 +205,7 @@ def keyboard_control(stdscr):
         elif key == ord('l'):  # Pitch positive
             xyzrpy[4] += angular_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Rotation error: {e}")
                 xyzrpy[4] -= angular_step  # Revert
@@ -213,7 +213,7 @@ def keyboard_control(stdscr):
         elif key == ord('.'):  # Pitch negative
             xyzrpy[4] -= angular_step
             try:
-                single_arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
+                arm.set_ee_pose_xyzrpy(xyzrpy=xyzrpy)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Rotation error: {e}")
                 xyzrpy[4] += angular_step  # Revert
@@ -223,7 +223,7 @@ def keyboard_control(stdscr):
             gripper -= gripper_step
             gripper = max(gripper, -1.0)  # Clamp to valid range
             try:
-                single_arm.set_catch_pos(pos=gripper)
+                arm.set_catch_pos(pos=gripper)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Gripper error: {e}")
                 
@@ -231,7 +231,7 @@ def keyboard_control(stdscr):
             gripper += gripper_step
             gripper = min(gripper, 1.0)  # Clamp to valid range
             try:
-                single_arm.set_catch_pos(pos=gripper)
+                arm.set_catch_pos(pos=gripper)
             except Exception as e:
                 stdscr.addstr(14, 0, f"Gripper error: {e}")
         
@@ -249,8 +249,8 @@ def main():
     
     try:
         # Initialize the arm
-        global single_arm
-        single_arm = ARXArm(arm_config)
+        global arm
+        arm = ARXArm(arm_config)
         print("ARX R5 arm initialized successfully!")
         
         # Start keyboard control interface

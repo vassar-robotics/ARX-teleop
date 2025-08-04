@@ -101,6 +101,6 @@ Make the following changes:
 
   - Know that the # of servos (motor_ids) is being increased by 1, so if there is anywhere in comments or code that this be refelcted, make that change
 
-   - In the new teleop_follower_remote, replace the motors from SO101Controllers to single_arm.py (ARX arms). Make sure that calls like self.apply_positions(self.telemetry_listener.latest_data) are adapted for to now go from "SO101Arm" objects, in the form of servo positions from the leader arm, to ARX arm positions, based on the ARX code in single_arm.py and the example in test_arx_via_keyboard, so get it to arm.set_joint_positions(q_smoothed). Depending on your preference, you may consider something like add read_joint_tics() and write_joint_tics() thin wrappers around get_joint_positions / set_joint_positions. 
+   - In the new teleop_follower_remote, replace the motors from SO101Controllers to arxarm.py (ARX arms). Make sure that calls like self.apply_positions(self.telemetry_listener.latest_data) are adapted for to now go from "SO101Arm" objects, in the form of servo positions from the leader arm, to ARX arm positions, based on the ARX code in arxarm.py and the example in test_arx_via_keyboard, so get it to arm.set_joint_positions(q_smoothed). Depending on your preference, you may consider something like add read_joint_tics() and write_joint_tics() thin wrappers around get_joint_positions / set_joint_positions. 
 
-    - Rename / refactor the ARX single_arm.py class to ARXArm
+    - Rename / refactor the ARX single_arm.py class to ARXArm (DONE - renamed to arxarm.py)
