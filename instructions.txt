@@ -10,17 +10,3 @@ Temp Token: 007eJxTYJD7UxMYwmq62WDvmX+iQpkHJW5veC207X3kJd5VXd1Zp+IUGFIMk4wtDNNST
 - Tokens expire - regenerate if you get "CAN_NOT_GET_GATEWAY_SERVER" errors
 
 
-AI instructions for changes to make:
-accoordingly. Make this change concise and simple, and in a way that reduces redundant code
-
- - VIDEO DISPLAY UI: Based on the screenshot, switch the video feed display in both leader adn follower programs to just display a single video feed, not an array of 2x2 video feeds. Make the new feed about the same size of the current 2x2 array of video feeds
-
- - VIDEO STREAM SELECTION: For the follower streaming file, create a simple UI to select a single video stream as the video to be streamed. Display all available video feeds in a text dropdown, but then when the user toggles the dropdown, the selected video feed is the one that is streamed over agora
-
- - VIDEO STREAMING SETUP: Since we only care about one video feed now, not 3, update the agora streaming code to only stream a single video. 
-
-When all is done, the follower program should allow the user to select a single video stream using a dropdown, and that video shjould be streamed. Both leader and follower should only display a single video feed.
-
-If the user selects a new video stream mid-stream, it should be updated.
-
-Make these changes and create checkpoints for me to step in and verify your work. Be methodical, and DON'T WRITE UNNECESSARY CODE - DON'T GET BOGGED DOWN IN EDGE CASES AND EXTRA CRAP - FOCUS ON THE CORE FUNCTIAONALITY.
