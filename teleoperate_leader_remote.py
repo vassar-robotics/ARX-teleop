@@ -150,6 +150,7 @@ class StatusListener(SubscribeCallback):
             timestamp = data.get("timestamp")
             if sequence is not None and timestamp is not None:
                 latency = self.monitor.message_acknowledged(sequence, timestamp)
+                logger.debug(f"Received ack for seq {sequence}, latency: {latency:.1f}ms")
                 if latency and latency > pubnub_config.LATENCY_WARNING_MS:
                     logger.warning(f"{Fore.YELLOW}High latency: {latency:.1f}ms{Style.RESET_ALL}")
                 
@@ -366,8 +367,12 @@ class LeaderTeleop:
         
         # Network stats
         print("Network Statistics:")
-        print(f"  Average Latency: {stats['avg_latency']:6.1f}ms")
-        print(f"  Max Latency:     {stats['max_latency']:6.1f}ms")
+        if stats['avg_latency'] > 0:
+            print(f"  Average Latency: {stats['avg_latency']:6.1f}ms")
+            print(f"  Max Latency:     {stats['max_latency']:6.1f}ms")
+        else:
+            print(f"  Network Latency: Disconnected (no acks received)")
+            print(f"  Max Latency:     --")
         print(f"  Packet Loss:     {stats['packet_loss']*100:6.1f}%")
         print(f"  Messages Sent:   {stats['sent']:6d}")
         
