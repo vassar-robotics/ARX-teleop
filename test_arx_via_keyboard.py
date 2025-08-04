@@ -14,7 +14,7 @@ Usage:
     python test_arx_via_keyboard.py
 """
 
-from arx_control import SingleArm
+from arx_control import ARXArm
 from typing import Dict, Any
 import numpy as np
 import curses
@@ -250,7 +250,7 @@ def main():
     try:
         # Initialize the arm
         global single_arm
-        single_arm = SingleArm(arm_config)
+        single_arm = ARXArm(arm_config)
         print("ARX R5 arm initialized successfully!")
         
         # Start keyboard control interface

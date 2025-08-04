@@ -61,7 +61,7 @@ def euler_to_quaternion(roll: float, pitch: float, yaw: float) -> np.ndarray:
     return np.array([w, x, y, z])
 
 
-class SingleArm:
+class ARXArm:
     """
     ARX R5 single robot arm controller.
     

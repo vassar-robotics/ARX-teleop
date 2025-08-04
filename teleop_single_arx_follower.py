@@ -1,0 +1,544 @@
+#!/usr/bin/env python3
+"""
+Single-arm follower-side teleoperation script using PubNub for internet communication.
+
+This script:
+1. Connects to 1 ARX R5 follower robot via CAN interface  # REMOVED: dual functionality for 2 followers
+2. Subscribes to position data from PubNub
+3. Applies received positions to the ARX follower robot with safety checks
+
+Usage:
+    python teleop_single_arx_follower.py
+"""
+
+import os
+import logging
+
+# Disable PubNub logging via environment variable
+os.environ['PUBNUB_LOG_LEVEL'] = 'NONE'
+
+# Configure logging BEFORE importing other modules
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+# Suppress verbose HTTP logs from various libraries
+logging.getLogger('urllib3').setLevel(logging.ERROR)
+logging.getLogger('requests').setLevel(logging.ERROR)
+logging.getLogger('httpx').setLevel(logging.ERROR)
+logging.getLogger('httpcore').setLevel(logging.ERROR)
+logging.getLogger('pubnub').setLevel(logging.WARNING)
+# Disable all INFO logs from modules starting with 'http'
+for name in logging.root.manager.loggerDict:
+    if name.startswith('http'):
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+import argparse
+import json
+import platform
+import signal
+import subprocess
+import sys
+import time
+import threading
+from typing import Dict, List, Optional
+import numpy as np
+
+try:
+    from pubnub.pnconfiguration import PNConfiguration
+    from pubnub.pubnub import PubNub
+    from pubnub.exceptions import PubNubException
+    from pubnub.callbacks import SubscribeCallback
+    from pubnub.enums import PNStatusCategory
+except ImportError:
+    print("PubNub not installed. Please install with: pip install pubnub")
+    sys.exit(1)
+
+try:
+    from colorama import init, Fore, Style
+    init()
+except ImportError:
+    # Fallback if colorama not installed
+    class Fore:
+        RED = GREEN = YELLOW = CYAN = MAGENTA = ""
+    class Style:
+        RESET_ALL = BRIGHT = ""
+
+# Import our modules
+import pubnub_config
+from arx_control import ARXArm  # Use ARX arm instead of SO101Controller
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+
+def signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) for graceful shutdown."""
+    global shutdown_requested
+    logger.info("\n\n⚠️  Shutdown requested. Cleaning up...")
+    shutdown_requested = True
+
+
+class ARXPositionSmoother:
+    """Smooth position changes for ARX arm to prevent jerky movements."""
+    
+    def __init__(self, smoothing_factor: float = 0.8):
+        self.smoothing_factor = smoothing_factor
+        self.current_positions = np.zeros(7)  # 7 joints for ARX R5
+        self.initialized = False
+        
+    def smooth(self, target_positions: np.ndarray) -> np.ndarray:
+        """Apply exponential smoothing to position changes."""
+        if not self.initialized:
+            self.current_positions = target_positions.copy()
+            self.initialized = True
+            return target_positions
+            
+        # Apply smoothing
+        smoothed = (self.current_positions * self.smoothing_factor + 
+                   target_positions * (1 - self.smoothing_factor))
+        
+        # Enforce maximum change limit per joint
+        max_change = 0.1  # Maximum change per joint in radians
+        for i in range(len(smoothed)):
+            change = abs(smoothed[i] - self.current_positions[i])
+            if change > max_change:
+                # Limit the change
+                direction = 1 if smoothed[i] > self.current_positions[i] else -1
+                smoothed[i] = self.current_positions[i] + (direction * max_change)
+                
+        self.current_positions = smoothed
+        return smoothed
+
+
+class ARXArmWrapper:
+    """Wrapper around ARXArm to provide SO101-style interface for teleoperation."""
+    
+    def __init__(self, can_port: str = "can0", robot_type: int = 1):
+        """Initialize ARX arm wrapper.
+        
+        Args:
+            can_port: CAN interface port (e.g., "can0")
+            robot_type: 1 for R5, 0 for X5lite
+        """
+        self.arm_config = {
+            "can_port": can_port,
+            "type": robot_type,
+            "num_joints": 7,  # Updated: 7 joints for ARX R5
+        }
+        self.arm = None
+        self.connected = False
+        self.robot_id = "ARXFollower"
+        
+        # Position conversion constants (these may need tuning)
+        # Convert from SO101 servo positions (0-4095) to ARX joint positions (radians)
+        self.servo_to_radian_scale = (2 * np.pi) / 4095.0  # Full rotation scale
+        self.servo_center = 2048  # SO101 center position
+        
+    def connect(self):
+        """Connect to the ARX arm."""
+        try:
+            self.arm = ARXArm(self.arm_config)
+            self.connected = True
+            logger.info(f"{Fore.GREEN}✓ Connected to ARX R5 arm{Style.RESET_ALL}")
+            
+            # Initialize to home position
+            self.arm.go_home()
+            time.sleep(1)  # Give time for initialization
+            
+        except Exception as e:
+            logger.error(f"Failed to connect to ARX arm: {e}")
+            raise
+            
+    def disconnect(self):
+        """Disconnect from the ARX arm."""
+        if self.connected and self.arm:
+            try:
+                # Return to safe position before disconnect
+                self.arm.go_home()
+                time.sleep(0.5)
+            except:
+                pass
+        self.connected = False
+        self.arm = None
+        
+    def read_joint_tics(self) -> Dict[int, int]:
+        """Read current joint positions as tic values (SO101-style interface).
+        
+        Returns:
+            Dict mapping motor ID to position in tics
+        """
+        if not self.connected or not self.arm:
+            return {}
+            
+        try:
+            joint_positions = self.arm.get_joint_positions()  # Returns radians
+            # Convert back to SO101-style tics for consistency
+            tics = {}
+            for i, pos_rad in enumerate(joint_positions[:7]):  # 7 joints
+                # Convert radians to tic position
+                tic_pos = int(pos_rad / self.servo_to_radian_scale + self.servo_center)
+                tics[i + 1] = tic_pos  # Motor IDs are 1-indexed
+            return tics
+        except Exception as e:
+            logger.error(f"Error reading joint positions: {e}")
+            return {}
+            
+    def write_joint_tics(self, positions: Dict[int, int]):
+        """Write joint positions from tic values (SO101-style interface).
+        
+        Args:
+            positions: Dict mapping motor ID to position in tics
+        """
+        if not self.connected or not self.arm:
+            return
+            
+        try:
+            # Convert SO101 tic positions to ARX joint positions (radians)
+            joint_positions = np.zeros(7)  # 7 joints for ARX R5
+            
+            for motor_id, tic_pos in positions.items():
+                if 1 <= motor_id <= 7:  # Valid motor IDs for 7-joint arm
+                    # Convert tic to radians
+                    rad_pos = (tic_pos - self.servo_center) * self.servo_to_radian_scale
+                    joint_positions[motor_id - 1] = rad_pos  # Convert to 0-indexed
+                    
+            # Set joint positions on ARX arm
+            self.arm.set_joint_positions(joint_positions)
+            
+        except Exception as e:
+            logger.error(f"Error writing joint positions: {e}")
+
+
+class TelemetryListener(SubscribeCallback):
+    """Listen for telemetry data from leaders."""
+    
+    def __init__(self):
+        self.latest_data = None
+        self.last_sequence = 0
+        self.received_count = 0
+        self.dropped_count = 0
+        self.last_receive_time = 0
+        
+    def status(self, pubnub, status):
+        """Handle connection status changes."""
+        if status.category == PNStatusCategory.PNConnectedCategory:
+            logger.info(f"{Fore.GREEN}✓ Connected to PubNub channels{Style.RESET_ALL}")
+        elif status.category == PNStatusCategory.PNReconnectedCategory:
+            logger.info(f"{Fore.YELLOW}Reconnected to PubNub{Style.RESET_ALL}")
+        elif status.category == PNStatusCategory.PNDisconnectedCategory:
+            logger.warning(f"{Fore.RED}Disconnected from PubNub{Style.RESET_ALL}")
+            
+    def message(self, pubnub, message):
+        """Handle incoming telemetry messages."""
+        try:
+            # Get the message data
+            data = message.message
+                
+            if isinstance(data, dict) and data.get("type") == "telemetry":
+                self.latest_data = data
+                self.last_receive_time = time.time()
+                self.received_count += 1
+                
+                # Check for dropped packets
+                sequence = data.get("sequence", 0)
+                if self.last_sequence > 0 and sequence > self.last_sequence + 1:
+                    self.dropped_count += sequence - self.last_sequence - 1
+                self.last_sequence = sequence
+                
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+
+
+class SingleFollowerTeleop:
+    """Main teleoperation class for single ARX follower."""
+    
+    def __init__(self, can_port: str = "can0", robot_type: int = 1):
+        self.can_port = can_port
+        self.robot_type = robot_type
+        self.follower: Optional[ARXArmWrapper] = None  # SIMPLIFIED: Single follower instead of list
+        self.running = False
+        
+        # Network components
+        self.pubnub: Optional[PubNub] = None
+        self.telemetry_listener = TelemetryListener()
+        
+        # Position smoothing
+        self.smoother = ARXPositionSmoother(pubnub_config.POSITION_SMOOTHING)
+        
+        # Update tracking
+        self.last_update_time = 0
+        self.update_times = []
+        self.latencies = []
+        
+    def setup_pubnub(self):
+        """Initialize PubNub connection."""
+        logger.info("Setting up PubNub connection...")
+        
+        pnconfig = PNConfiguration()
+        pnconfig.subscribe_key = pubnub_config.SUBSCRIBE_KEY
+        pnconfig.publish_key = pubnub_config.PUBLISH_KEY
+        pnconfig.user_id = f"follower-{platform.node()}"
+        pnconfig.ssl = True
+        pnconfig.enable_subscribe = True
+        # Disable PubNub's internal logging
+        pnconfig.log_verbosity = False
+        pnconfig.enable_logging = False
+        
+        self.pubnub = PubNub(pnconfig)
+        self.pubnub.add_listener(self.telemetry_listener)
+        
+        # Subscribe to telemetry channel
+        self.pubnub.subscribe().channels([pubnub_config.TELEMETRY_CHANNEL]).execute()
+        
+        logger.info(f"{Fore.GREEN}✓ PubNub connected as {pnconfig.user_id}{Style.RESET_ALL}")
+        
+    def connect_follower(self):
+        """Connect to the ARX follower robot."""
+        # SIMPLIFIED: Single follower object instead of list
+        self.follower = ARXArmWrapper(self.can_port, self.robot_type)
+        self.follower.connect()
+        
+        logger.info(f"{Fore.GREEN}✓ Connected to ARX follower robot{Style.RESET_ALL}")
+        
+    def send_acknowledgment(self, sequence: int, timestamp: float):
+        """Send acknowledgment back to leader."""
+        try:
+            ack_msg = {
+                "type": "ack",
+                "sequence": sequence,
+                "timestamp": timestamp,
+                "follower_id": f"follower-{platform.node()}"
+            }
+            self.pubnub.publish().channel(pubnub_config.STATUS_CHANNEL).message(ack_msg).sync()
+        except:
+            pass  # Don't fail on ack errors
+            
+    def send_status(self):
+        """Send periodic status updates."""
+        try:
+            status_msg = {
+                "type": "status",
+                "timestamp": time.time(),
+                "follower_id": f"follower-{platform.node()}",
+                "motors_active": 7,  # Updated: 7 motors for ARX R5
+                "followers_connected": 1  # Single follower
+            }
+            self.pubnub.publish().channel(pubnub_config.STATUS_CHANNEL).message(status_msg).sync()
+        except:
+            pass
+            
+    def apply_positions(self, telemetry_data: Dict):
+        """Apply received positions to ARX follower robot."""
+        timestamp = telemetry_data.get("timestamp", 0)
+        sequence = telemetry_data.get("sequence", 0)
+        positions_data = telemetry_data.get("positions", {})
+        
+        # Debug logging
+        logger.debug(f"Received positions: {positions_data}")
+        
+        # Calculate latency
+        latency = (time.time() - timestamp) * 1000  # ms
+        self.latencies.append(latency)
+        if len(self.latencies) > 100:
+            self.latencies.pop(0)
+            
+        # Safety check: reject if latency too high
+        if latency > pubnub_config.MAX_LATENCY_MS:
+            logger.warning(f"{Fore.RED}Rejecting data: latency {latency:.1f}ms > {pubnub_config.MAX_LATENCY_MS}ms{Style.RESET_ALL}")
+            return
+            
+        # Send acknowledgment
+        self.send_acknowledgment(sequence, timestamp)
+        
+        # SIMPLIFIED: Direct position application for single arm
+        if not self.follower or not self.follower.connected:
+            logger.warning("No connected follower to apply positions to")
+            return
+            
+        try:
+            # Convert string motor IDs back to integers and create position dict
+            motor_positions = {}
+            for motor_id_str, position in positions_data.items():
+                motor_id = int(motor_id_str)
+                motor_positions[motor_id] = position
+                
+            logger.debug(f"Writing positions to ARX arm: {motor_positions}")
+            
+            # Apply positions to ARX arm using the wrapper
+            self.follower.write_joint_tics(motor_positions)
+            
+        except Exception as e:
+            logger.error(f"Error applying positions: {e}")
+            
+    def display_status(self):
+        """Display current status and statistics."""
+        # Clear screen and move cursor to top
+        print("\033[2J\033[H", end="")
+        
+        print(f"{Style.BRIGHT}=== SINGLE ARM ARX FOLLOWER TELEOPERATION ==={Style.RESET_ALL}")
+        
+        # Connected follower
+        print(f"{Style.BRIGHT}Connected Follower:{Style.RESET_ALL}")
+        if self.follower:
+            print(f"  ARX R5 - {'Connected' if self.follower.connected else 'Disconnected'}")
+            print(f"  Motors: 7 joints")  # Updated motor count reference
+        print()
+        
+        # Network stats
+        stats = {
+            'received': self.telemetry_listener.received_count,
+            'dropped': self.telemetry_listener.dropped_count,
+            'latency': self.latencies
+        }
+        print(f"{Style.BRIGHT}Network Statistics:{Style.RESET_ALL}")
+        if stats['latency']:
+            avg_latency = sum(stats['latency']) / len(stats['latency'])
+            max_latency = max(stats['latency'])
+            print(f"  Average Latency: {avg_latency:.1f}ms")
+            print(f"  Max Latency:     {max_latency:.1f}ms")
+        else:
+            print(f"  Latency: No data yet")
+            
+        print(f"  Received:        {stats['received']}")
+        print(f"  Dropped:         {stats['dropped']}")
+        
+        # Update rate
+        if self.update_times:
+            avg_interval = sum(self.update_times) / len(self.update_times)
+            actual_fps = 1.0 / avg_interval if avg_interval > 0 else 0
+            print(f"  Update Rate:     {actual_fps:.1f} Hz")
+            
+        # Connection status
+        if self.telemetry_listener.last_receive_time > 0:
+            age = time.time() - self.telemetry_listener.last_receive_time
+            if age < 1:
+                status = f"{Fore.GREEN}Connected{Style.RESET_ALL}"
+            elif age < 5:
+                status = f"{Fore.YELLOW}Slow{Style.RESET_ALL}"
+            else:
+                status = f"{Fore.RED}Disconnected{Style.RESET_ALL}"
+            print(f"  Status:          {status} (last data {age:.1f}s ago)")
+            
+        print()
+        print(f"{Fore.CYAN}Press Ctrl+C to stop{Style.RESET_ALL}")
+        
+    def teleoperation_loop(self):
+        """Main loop processing received positions."""
+        self.running = True
+        
+        # Start display thread
+        display_thread = threading.Thread(target=self.display_loop, daemon=True)
+        display_thread.start()
+        
+        # Start status thread
+        status_thread = threading.Thread(target=self.status_loop, daemon=True)
+        status_thread.start()
+        
+        logger.info("Starting ARX follower teleoperation...")
+        
+        try:
+            while self.running and not shutdown_requested:
+                # Check for new telemetry data
+                if self.telemetry_listener.latest_data:
+                    # Process the latest data
+                    self.apply_positions(self.telemetry_listener.latest_data)
+                    
+                    # Track update rate
+                    now = time.time()
+                    if self.last_update_time > 0:
+                        self.update_times.append(now - self.last_update_time)
+                        if len(self.update_times) > 100:
+                            self.update_times.pop(0)
+                    self.last_update_time = now
+                    
+                    # Clear to prevent reprocessing
+                    self.telemetry_listener.latest_data = None
+                    
+                # Small sleep to prevent CPU spinning
+                time.sleep(0.001)
+                
+        except KeyboardInterrupt:
+            logger.info("\nStopping teleoperation...")
+        finally:
+            self.running = False
+            
+    def display_loop(self):
+        """Separate thread for updating display."""
+        while self.running and not shutdown_requested:
+            self.display_status()
+            time.sleep(0.5)  # Update display at 2Hz
+            
+    def status_loop(self):
+        """Send periodic status updates."""
+        while self.running and not shutdown_requested:
+            self.send_status()
+            time.sleep(2)  # Send status every 2 seconds
+            
+    def shutdown(self):
+        """Clean shutdown."""
+        self.running = False
+        
+        # Unsubscribe from channels
+        if self.pubnub:
+            self.pubnub.unsubscribe_all()
+            
+        # Return to home position and disconnect robot
+        logger.info("Returning ARX arm to home position...")
+        if self.follower and self.follower.connected:
+            try:
+                self.follower.arm.go_home()
+                time.sleep(1)  # Give time for movement
+            except Exception as e:
+                logger.warning(f"Failed to return to home position: {e}")
+                
+        logger.info("Disconnecting robot...")
+        if self.follower:
+            try:
+                self.follower.disconnect()
+            except Exception as e:
+                logger.warning(f"Failed to disconnect follower: {e}")
+                
+        logger.info("Shutdown complete")
+
+
+def main():
+    # Register signal handler for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    parser = argparse.ArgumentParser(description="Single-arm ARX follower-side teleoperation via PubNub")
+    parser.add_argument("--can_port", type=str, default="can0",
+                       help="CAN interface port")
+    parser.add_argument("--robot_type", type=int, default=1,
+                       help="Robot type (0 for X5lite, 1 for R5)")
+    parser.add_argument("--debug", action="store_true",
+                       help="Enable debug logging")
+    
+    args = parser.parse_args()
+    
+    # Set logging level
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
+    
+    # Create and run teleoperation
+    teleop = SingleFollowerTeleop(args.can_port, args.robot_type)
+    
+    try:
+        # Setup
+        teleop.setup_pubnub()
+        teleop.connect_follower()
+        
+        # Run main loop
+        teleop.teleoperation_loop()
+        
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        return 1
+    finally:
+        teleop.shutdown()
+        
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
