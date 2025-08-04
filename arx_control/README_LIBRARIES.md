@@ -1,8 +1,10 @@
 # ARX Control Libraries
 
-## Important: Binary Files Not Included
+## Important: Binary Files Not Included (Best Practice)
 
-The ARX control libraries (`.so` files) are platform-specific and are not included in the git repository. You need to set them up for your platform.
+The ARX control libraries (`.so` files) are platform-specific and should not be included in the git repository. 
+
+**Note**: Currently the binaries ARE checked into git (in `arx_control/lib/`) for convenience, but this is not recommended practice. These are Linux x86_64 binaries and will NOT work on macOS or other platforms.
 
 ## Setup Instructions
 
