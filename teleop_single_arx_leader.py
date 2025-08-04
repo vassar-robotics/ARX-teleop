@@ -162,6 +162,9 @@ class StatusListener(SubscribeCallback):
 class SingleLeaderTeleop:
     """Main teleoperation class for single leader arm."""
     
+    # HARDCODED PORT - Change this to switch ports easily
+    LEADER_PORT = "/dev/tty.usbmodem5A460813891"
+    
     def __init__(self, motor_ids: List[int], baudrate: int = 1000000):
         self.motor_ids = motor_ids
         self.baudrate = baudrate
@@ -200,37 +203,40 @@ class SingleLeaderTeleop:
         
         logger.info(f"{Fore.GREEN}✓ PubNub connected as {pnconfig.user_id}{Style.RESET_ALL}")
         
-    def auto_detect_leader(self) -> str:
-        """Find and identify the single leader robot."""
-        ports = find_robot_ports()
-        leader_port = None
-        
-        logger.info(f"Found {len(ports)} serial ports")
-        
-        for port in ports:
-            try:
-                is_leader, voltage = identify_robot_by_voltage(port, self.motor_ids)
-                if is_leader:
-                    leader_port = port
-                    logger.info(f"{Fore.GREEN}✓ Leader robot found at {port} ({voltage:.1f}V){Style.RESET_ALL}")
-                    break
-            except Exception as e:
-                logger.warning(f"Failed to identify {port}: {e}")
-                
-        if leader_port is None:
-            raise RuntimeError("No leader robot found")
-            
-        return leader_port
+    # COMMENTED OUT - Auto-detection logic (uncomment to re-enable)
+    # def auto_detect_leader(self) -> str:
+    #     """Find and identify the single leader robot."""
+    #     ports = find_robot_ports()
+    #     leader_port = None
+    #     
+    #     logger.info(f"Found {len(ports)} serial ports")
+    #     
+    #     for port in ports:
+    #         try:
+    #             is_leader, voltage = identify_robot_by_voltage(port, self.motor_ids)
+    #             if is_leader:
+    #                 leader_port = port
+    #                 logger.info(f"{Fore.GREEN}✓ Leader robot found at {port} ({voltage:.1f}V){Style.RESET_ALL}")
+    #                 break
+    #         except Exception as e:
+    #             logger.warning(f"Failed to identify {port}: {e}")
+    #             
+    #     if leader_port is None:
+    #         raise RuntimeError("No leader robot found")
+    #         
+    #     return leader_port
         
     def connect_leader(self):
         """Connect to the single leader robot."""
-        leader_port = self.auto_detect_leader()
+        # Use hardcoded port instead of auto-detection
+        leader_port = self.LEADER_PORT
+        logger.info(f"Using hardcoded leader port: {leader_port}")
         
         # SIMPLIFIED: Single leader object instead of list
         self.leader = SO101Controller(leader_port, self.motor_ids, self.baudrate, "Leader")
         self.leader.connect()
             
-        logger.info(f"{Fore.GREEN}✓ Connected to leader robot{Style.RESET_ALL}")
+        logger.info(f"{Fore.GREEN}✓ Connected to leader robot at {leader_port}{Style.RESET_ALL}")
         
     def publish_positions(self, positions: Dict[int, int]):
         """Publish position data to PubNub."""
@@ -264,44 +270,34 @@ class SingleLeaderTeleop:
             logger.error(f"Failed to publish: {e}")
             
     def display_status(self):
-        """Display current status and statistics."""
+        """Display current status and statistics - compact version."""
         stats = self.monitor.get_stats()
         
-        # Simple approach - just print with newlines
-        print("\n" * 50)  # Clear screen by scrolling
+        # Build compact status line
+        leader_status = "✓" if self.leader and self.leader.connected else "❌"
         
-        print("=== SINGLE ARM LEADER TELEOPERATION ===")
-        print(f"Connected Leader: {'Yes' if self.leader and self.leader.connected else 'No'}")
-        print(f"Motor IDs: {len(self.motor_ids)} motors")  # Updated motor count reference
-        print()
-        
-        # Network stats
-        print("Network Statistics:")
+        # Network info
         if stats['avg_latency'] > 0:
-            print(f"  Average Latency: {stats['avg_latency']:6.1f}ms")
-            print(f"  Max Latency:     {stats['max_latency']:6.1f}ms")
+            net_info = f"Latency: {stats['avg_latency']:.1f}ms | Loss: {stats['packet_loss']*100:.1f}%"
         else:
-            print(f"  Network Latency: Disconnected (no acks received)")
-            print(f"  Max Latency:     --")
-        print(f"  Packet Loss:     {stats['packet_loss']*100:6.1f}%")
-        print(f"  Messages Sent:   {stats['sent']:6d}")
+            net_info = "Network: Disconnected"
         
         # Publish rate
         if self.publish_times:
             avg_interval = sum(self.publish_times) / len(self.publish_times)
             actual_fps = 1.0 / avg_interval if avg_interval > 0 else 0
-            print(f"  Publish Rate:    {actual_fps:6.1f} Hz")
-            
-        # Follower status
-        print()
-        print("Follower Status:")
-        for follower_id, status in self.status_listener.follower_status.items():
-            age = time.time() - status.get("timestamp", 0)
-            if age < 5:  # Only show recent status
-                print(f"  {follower_id}: Connected")
-                
-        print()
-        print("Press Ctrl+C to stop")
+            rate_info = f"Rate: {actual_fps:.1f}Hz"
+        else:
+            rate_info = "Rate: --"
+        
+        # Follower count
+        active_followers = sum(1 for fid, status in self.status_listener.follower_status.items() 
+                              if time.time() - status.get("timestamp", 0) < 5)
+        follower_info = f"Followers: {active_followers}"
+        
+        # Single compact line
+        status_line = f"LEADER {leader_status} | {net_info} | {rate_info} | {follower_info} | Sent: {stats['sent']}"
+        print(f"\r{status_line:<80}", end="", flush=True)
         
     def teleoperation_loop(self):
         """Main loop reading positions and publishing."""
@@ -313,6 +309,7 @@ class SingleLeaderTeleop:
         display_thread.start()
         
         logger.info(f"Starting single arm teleoperation at {pubnub_config.TARGET_FPS} Hz...")
+        logger.info("Status updates every 2 seconds on single line. Press Ctrl+C to stop.")
         
         try:
             while self.running and not shutdown_requested:
@@ -330,7 +327,8 @@ class SingleLeaderTeleop:
                     time.sleep(target_interval - elapsed)
                     
         except KeyboardInterrupt:
-            logger.info("\nStopping teleoperation...")
+            print()  # New line after status display
+            logger.info("Stopping teleoperation...")
         finally:
             self.running = False
             
@@ -338,11 +336,12 @@ class SingleLeaderTeleop:
         """Separate thread for updating display."""
         while self.running and not shutdown_requested:
             self.display_status()
-            time.sleep(0.5)  # Update display at 2Hz
+            time.sleep(2.0)  # Update display at 0.5Hz (every 2 seconds) - much less frequent
             
     def shutdown(self):
         """Clean shutdown."""
         self.running = False
+        print()  # New line after status display
         
         # Publish disconnect message
         if self.pubnub:
@@ -374,7 +373,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     
     parser = argparse.ArgumentParser(description="Single-arm leader-side teleoperation via PubNub")
-    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7",  # Updated: 7 motors instead of 6
+    parser.add_argument("--motor_ids", type=str, default="2,3,4,5,6,7",  # Skip motor 1 for now - it's not responding properly
                        help="Comma-separated motor IDs")
     parser.add_argument("--baudrate", type=int, default=1000000,
                        help="Serial baudrate")
