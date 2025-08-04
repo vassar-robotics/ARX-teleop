@@ -95,3 +95,12 @@ Edit the arm_config in test_arx_via_keyboard.py:
 
 
 Using Feetech Servos to Teleoperate an ARX arm:
+
+Make the following changes:
+ - Refactor the teleoperate_leader_remote and follower_remote to only control a single arm (IE, 1 pair of leader/follower) -- leave comments where you remove the dual-functuiaonlity, so it can easily be added back in. Do this change in a NEW file, called teleop_single_arx_leader/follower.py (leave the current files as-is). P.S. - switching to 1 arm instead of 2 should dramatically simplify the script. Embrace that simplification. For example, we don't need self.followers = [list of follower controllers] as part of the class now that there's only 1 object. Remove "bureacracy"
+
+  - Know that the # of servos (motor_ids) is being increased by 1, so if there is anywhere in comments or code that this be refelcted, make that change
+
+   - In the new teleop_follower_remote, replace the motors from SO101Controllers to single_arm.py (ARX arms). Make sure that calls like self.apply_positions(self.telemetry_listener.latest_data) are adapted for to now go from "SO101Arm" objects, in the form of servo positions from the leader arm, to ARX arm positions, based on the ARX code in single_arm.py and the example in test_arx_via_keyboard, so get it to arm.set_joint_positions(q_smoothed). Depending on your preference, you may consider something like add read_joint_tics() and write_joint_tics() thin wrappers around get_joint_positions / set_joint_positions. 
+
+    - Rename / refactor the ARX single_arm.py class to ARXArm
