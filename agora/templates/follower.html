@@ -164,7 +164,6 @@
         let isStreaming = false;
         let selectedCameraIndex = null;
         let availableDevices = [];
-        let latencyInterval = null;
         
         function addStatus(message, type = 'info') {
             const statusDiv = document.getElementById('status-messages');
@@ -304,9 +303,6 @@
                 await client.join(config.appId, config.channels[0], token, uid);
                 addStatus(`Joined channel: ${config.channels[0]}${uid ? ' with UID: ' + uid : ''}`, 'ok');
                 
-                // Start sending periodic timestamps for latency measurement
-                startLatencyPing();
-                
                 // Create and start video stream
                 await createVideoStream();
                 
@@ -385,9 +381,6 @@
             
             addStatus('Stopping video streaming...', 'info');
             
-            // Stop latency ping
-            stopLatencyPing();
-            
             // Stop and close track
             if (localTrack) {
                 localTrack.stop();
@@ -416,26 +409,6 @@
             addStatus('Video streaming stopped', 'ok');
         }
         
-        function startLatencyPing() {
-            // Send timestamp every 2 seconds for latency measurement
-            latencyInterval = setInterval(() => {
-                if (client && isStreaming) {
-                    try {
-                        const timestamp = Date.now();
-                        client.sendStreamMessage(`latency_ping:${timestamp}`);
-                    } catch (error) {
-                        console.log('Failed to send latency ping:', error);
-                    }
-                }
-            }, 2000);
-        }
-        
-        function stopLatencyPing() {
-            if (latencyInterval) {
-                clearInterval(latencyInterval);
-                latencyInterval = null;
-            }
-        }
         
         async function refreshCameras() {
             addStatus('Refreshing camera list...', 'info');
