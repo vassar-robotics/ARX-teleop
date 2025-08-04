@@ -1,0 +1,57 @@
+Here are instructions to get the ARX R5 arm functioning using this repository. Created by Nate and Ashley on 25/08/01.
+
+## Prerequisites
+- ARX R5 arm plugged in via USB (through CAN adapter) and powered on
+- Python 3 with pybind11 installed (`pip install pybind11`)
+
+## Quick Start
+
+### Terminal 1: Set up CAN interface
+```bash
+# Find your CAN adapter device (usually /dev/ttyACM0 or /dev/ttyACM1)
+ls /dev/ttyACM*
+
+# Set up CAN interface (replace /dev/ttyACM0 with your device)
+sudo slcand -o -f -s8 /dev/ttyACM0 can0
+sudo ip link set can0 up
+```
+
+### Terminal 2: Run the test
+```bash
+# Navigate to Python SDK ( cd /home/vassar/code/R5/py/ARX_R5_python )
+cd py/ARX_R5_python
+
+# Set up environment and run
+source setup.sh ( may also need: export PYTHONPATH=$(pwd)/bimanual/api/arx_r5_python:$PYTHONPATH )
+python test_keyboard.py
+```
+
+## Troubleshooting
+
+- **"command not found" for `slcand`**: Install with `sudo apt install can-utils`
+- **"Socket not open" errors**: Check if can0 exists with `ip link show can0`
+- **"ModuleNotFoundError"**: Make sure you have the required Python packages (pybind11, etc.)
+
+## Keyboard Controls for test_keyboard.py
+
+Once the program is running, use these keys to control the arm:
+
+**Movement:**
+- `w/s` - Move forward/backward (X axis)
+- `a/d` - Move left/right (Y axis)
+- `↑/↓` arrows - Move up/down (Z axis)
+- `←/→` arrows - Also move left/right (Y axis)
+
+**Rotation:**
+- `m/n` - Rotate roll
+- `l/.` - Rotate pitch  
+- `,//` - Rotate yaw
+
+**Gripper:**
+- `c` - Close gripper
+- `o` - Open gripper
+
+**Other:**
+- `i` - Enable gravity compensation mode
+- `r` - Return to home position
+- `q` - Quit program

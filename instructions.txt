@@ -10,3 +10,78 @@ Temp Token: 007eJxTYJD7UxMYwmq62WDvmX+iQpkHJW5veC207X3kJd5VXd1Zp+IUGFIMk4wtDNNST
 - Tokens expire - regenerate if you get "CAN_NOT_GET_GATEWAY_SERVER" errors
 
 
+ARX via Keyboard Control:
+===========================
+
+## Prerequisites
+- ARX R5 arm connected via CAN adapter and powered on
+- Python 3 with numpy installed
+- CAN interface tools installed (`sudo apt install can-utils`)
+- ARX libraries built in arx_local_control_example/
+
+## Quick Start
+
+### 1. Set up CAN interface
+```bash
+# Find your CAN adapter device (usually /dev/ttyACM0 or /dev/ttyACM1)
+ls /dev/tty.*
+
+# Set up CAN interface (replace /dev/ttyACM0 with your device)
+sudo slcand -o -f -s8 /dev/tty.usbmodemSN234567892 can0
+sudo ifconfig can0 up
+```
+
+### 2. Build ARX libraries (if not already done)
+```bash
+cd arx_local_control_example/ARX_R5_python
+./build.sh
+```
+
+### 3. Set up environment and run
+```bash
+# Set up library paths
+source arx_control/setup_env.sh
+
+# Run keyboard control
+python3 test_arx_via_keyboard.py
+```
+
+## Keyboard Controls
+
+Once the program is running, use these keys to control the arm:
+
+**Movement:**
+- `w/s` - Move forward/backward (X axis)
+- `a/d` - Move left/right (Y axis)
+- `↑/↓` arrows - Move up/down (Z axis)
+- `←/→` arrows - Also move left/right (Y axis)
+
+**Rotation:**
+- `m/n` - Rotate roll
+- `l/.` - Rotate pitch  
+- `,//` - Rotate yaw
+
+**Gripper:**
+- `c` - Close gripper
+- `o` - Open gripper
+
+**Other:**
+- `i` - Enable gravity compensation mode
+- `r` - Return to home position
+- `q` - Quit program
+
+## Troubleshooting
+
+- **Import errors**: Make sure to source arx_control/setup_env.sh and build the libraries
+- **CAN connection errors**: Check CAN interface with `ip link show can0`
+- **Movement errors**: Try gravity compensation mode first with 'i'
+- **Permission errors**: You may need sudo for CAN interface setup
+
+## Configuration
+
+Edit the arm_config in test_arx_via_keyboard.py:
+- can_port: "can0" (or your CAN interface)
+- type: 1 for R5 robot, 0 for X5lite
+
+
+Using Feetech Servos to Teleoperate an ARX arm:
