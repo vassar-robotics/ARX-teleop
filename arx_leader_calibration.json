@@ -1,0 +1,27 @@
+{
+  "timestamp": 1754351791.41208,
+  "timestamp_str": "2025-08-04 16:56:31",
+  "motor_ids": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "home_positions": {
+    "1": 2051,
+    "2": 816,
+    "3": 3051,
+    "4": 2893,
+    "5": 2080,
+    "6": 2047,
+    "7": 2
+  },
+  "servo_resolution": 4096,
+  "port": "/dev/cu.usbmodem5A460813891",
+  "voltage": 5.1,
+  "is_leader": true,
+  "notes": "Leader arm home positions corresponding to ARX R5 home pose"
+}

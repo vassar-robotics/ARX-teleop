@@ -113,12 +113,13 @@ class ARXPositionSmoother:
 class ARXArmWrapper:
     """Wrapper around ARXArm to provide SO101-style interface for teleoperation."""
     
-    def __init__(self, can_port: str = "can0", robot_type: int = 1):
+    def __init__(self, can_port: str = "can0", robot_type: int = 1, calibration_file: str = "arx_leader_calibration.json"):
         """Initialize ARX arm wrapper.
         
         Args:
             can_port: CAN interface port (e.g., "can0")
             robot_type: 1 for R5, 0 for X5lite
+            calibration_file: Path to calibration file for leader-follower position mapping
         """
         self.arm_config = {
             "can_port": can_port,
@@ -128,11 +129,51 @@ class ARXArmWrapper:
         self.arm = None
         self.connected = False
         self.robot_id = "ARXFollower"
+        self.calibration_file = calibration_file
         
-        # Position conversion constants (these may need tuning)
+        # Position conversion constants
         # Convert from SO101 servo positions (0-4095) to ARX joint positions (radians)
         self.servo_to_radian_scale = (2 * np.pi) / 4095.0  # Full rotation scale
-        self.servo_center = 2048  # SO101 center position
+        
+        # Load calibration data or use defaults
+        self.servo_centers = self._load_calibration()
+        
+    def _load_calibration(self) -> Dict[int, int]:
+        """Load servo center positions from calibration file."""
+        default_centers = {i: 2048 for i in range(1, 8)}  # Default center for 7 joints
+        
+        if not os.path.exists(self.calibration_file):
+            logger.warning(f"Calibration file not found: {self.calibration_file}")
+            logger.warning("Using default servo centers (2048). Consider running calibration.")
+            return default_centers
+            
+        try:
+            with open(self.calibration_file, 'r') as f:
+                calibration_data = json.load(f)
+                
+            home_positions = calibration_data.get("home_positions", {})
+            motor_ids = calibration_data.get("motor_ids", list(range(1, 8)))
+            
+            # Convert string keys to int and validate
+            servo_centers = {}
+            for motor_id in motor_ids:
+                key = str(motor_id)  # JSON keys are strings
+                if key in home_positions:
+                    servo_centers[motor_id] = int(home_positions[key])
+                else:
+                    logger.warning(f"Missing calibration for motor {motor_id}, using default")
+                    servo_centers[motor_id] = 2048
+                    
+            logger.info(f"✓ Loaded calibration from {self.calibration_file}")
+            logger.info(f"  Created: {calibration_data.get('timestamp_str', 'Unknown')}")
+            logger.info(f"  Servo centers: {servo_centers}")
+            
+            return servo_centers
+            
+        except Exception as e:
+            logger.error(f"Failed to load calibration: {e}")
+            logger.warning("Using default servo centers")
+            return default_centers
         
     def connect(self):
         """Connect to the ARX arm."""
@@ -175,9 +216,11 @@ class ARXArmWrapper:
             # Convert back to SO101-style tics for consistency
             tics = {}
             for i, pos_rad in enumerate(joint_positions[:7]):  # 7 joints
-                # Convert radians to tic position
-                tic_pos = int(pos_rad / self.servo_to_radian_scale + self.servo_center)
-                tics[i + 1] = tic_pos  # Motor IDs are 1-indexed
+                motor_id = i + 1  # Motor IDs are 1-indexed
+                servo_center = self.servo_centers.get(motor_id, 2048)
+                # Convert radians to tic position using calibrated center
+                tic_pos = int(pos_rad / self.servo_to_radian_scale + servo_center)
+                tics[motor_id] = tic_pos
             return tics
         except Exception as e:
             logger.error(f"Error reading joint positions: {e}")
@@ -198,8 +241,10 @@ class ARXArmWrapper:
             
             for motor_id, tic_pos in positions.items():
                 if 1 <= motor_id <= 7:  # Valid motor IDs for 7-joint arm
-                    # Convert tic to radians
-                    rad_pos = (tic_pos - self.servo_center) * self.servo_to_radian_scale
+                    # Get calibrated center for this motor
+                    servo_center = self.servo_centers.get(motor_id, 2048)
+                    # Convert tic to radians using calibrated center
+                    rad_pos = (tic_pos - servo_center) * self.servo_to_radian_scale
                     joint_positions[motor_id - 1] = rad_pos  # Convert to 0-indexed
                     
             # Set joint positions on ARX arm
@@ -252,9 +297,10 @@ class TelemetryListener(SubscribeCallback):
 class SingleFollowerTeleop:
     """Main teleoperation class for single ARX follower."""
     
-    def __init__(self, can_port: str = "can0", robot_type: int = 1):
+    def __init__(self, can_port: str = "can0", robot_type: int = 1, calibration_file: str = "arx_leader_calibration.json"):
         self.can_port = can_port
         self.robot_type = robot_type
+        self.calibration_file = calibration_file
         self.follower: Optional[ARXArmWrapper] = None  # SIMPLIFIED: Single follower instead of list
         self.running = False
         
@@ -295,7 +341,7 @@ class SingleFollowerTeleop:
     def connect_follower(self):
         """Connect to the ARX follower robot."""
         # SIMPLIFIED: Single follower object instead of list
-        self.follower = ARXArmWrapper(self.can_port, self.robot_type)
+        self.follower = ARXArmWrapper(self.can_port, self.robot_type, self.calibration_file)
         self.follower.connect()
         
         logger.info(f"{Fore.GREEN}✓ Connected to ARX follower robot{Style.RESET_ALL}")
@@ -510,6 +556,8 @@ def main():
                        help="CAN interface port")
     parser.add_argument("--robot_type", type=int, default=1,
                        help="Robot type (0 for X5lite, 1 for R5)")
+    parser.add_argument("--calibration_file", type=str, default="arx_leader_calibration.json",
+                       help="Path to calibration file for servo-to-ARX position mapping")
     parser.add_argument("--debug", action="store_true",
                        help="Enable debug logging")
     
@@ -521,7 +569,7 @@ def main():
         logger.debug("Debug logging enabled")
     
     # Create and run teleoperation
-    teleop = SingleFollowerTeleop(args.can_port, args.robot_type)
+    teleop = SingleFollowerTeleop(args.can_port, args.robot_type, args.calibration_file)
     
     try:
         # Setup
