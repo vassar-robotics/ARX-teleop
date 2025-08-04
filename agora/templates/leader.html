@@ -117,6 +117,7 @@
             <h3>Connection Information</h3>
             <div id="channel-info">Loading configuration...</div>
             <div id="latency-info" style="margin-top: 10px; font-weight: bold;">Network Latency: Measuring...</div>
+            <div id="latency-avg-info" style="margin-top: 5px; font-size: 14px;">Rolling Avg (10s): --</div>
         </div>
         
         <div class="controls">
@@ -147,6 +148,8 @@
         let isRecording = false;
         let currentLatency = null;
         let latencyStartTime = 0;
+        let latencyHistory = []; // Store last N latency measurements
+        let maxLatencyHistory = 5; // Keep last 5 measurements (10 seconds at 2-second intervals)
         
         function addStatus(message, type = 'info') {
             const statusDiv = document.getElementById('status-messages');
@@ -171,28 +174,27 @@
         
         function updateLatencyDisplay() {
             const latencyDiv = document.getElementById('latency-info');
+            const latencyAvgDiv = document.getElementById('latency-avg-info');
+            
             if (currentLatency !== null) {
                 const color = currentLatency < 100 ? '#4CAF50' : currentLatency < 300 ? '#ff9800' : '#f44336';
                 latencyDiv.innerHTML = `<span style="color: ${color};">Network Latency: ${currentLatency}ms</span>`;
+                
+                // Calculate rolling average
+                if (latencyHistory.length > 0) {
+                    const sum = latencyHistory.reduce((a, b) => a + b, 0);
+                    const average = Math.round(sum / latencyHistory.length);
+                    const avgColor = average < 100 ? '#4CAF50' : average < 300 ? '#ff9800' : '#f44336';
+                    latencyAvgDiv.innerHTML = `<span style="color: ${avgColor};">Rolling Avg (${latencyHistory.length * 2}s): ${average}ms</span>`;
+                } else {
+                    latencyAvgDiv.innerHTML = 'Rolling Avg (10s): --';
+                }
             } else if (isReceiving) {
                 latencyDiv.innerHTML = 'Network Latency: Measuring...';
+                latencyAvgDiv.innerHTML = 'Rolling Avg (10s): --';
             } else {
                 latencyDiv.innerHTML = 'Network Latency: Disconnected';
-            }
-        }
-        
-        function startLatencyMeasurement() {
-            // Simple latency measurement using video statistics
-            if (client) {
-                setInterval(() => {
-                    if (isReceiving) {
-                        // Simulate network latency measurement
-                        // In a real implementation, this would measure actual network delay
-                        const simulatedLatency = Math.floor(Math.random() * 150) + 50; // 50-200ms
-                        currentLatency = simulatedLatency;
-                        updateLatencyDisplay();
-                    }
-                }, 2000);
+                latencyAvgDiv.innerHTML = 'Rolling Avg (10s): --';
             }
         }
         
@@ -245,9 +247,6 @@
                 await client.join(config.appId, config.channels[0], token, null);
                 addStatus(`Joined channel: ${config.channels[0]}`, 'ok');
                 
-                // Start latency measurement
-                startLatencyMeasurement();
-                
                 // Subscribe to remote users
                 client.on('user-published', async (user, mediaType) => {
                     await client.subscribe(user, mediaType);
@@ -276,6 +275,15 @@
                             const timestamp = parseInt(message.split(':')[1]);
                             const now = Date.now();
                             currentLatency = now - timestamp;
+                            
+                            // Add to latency history for rolling average
+                            latencyHistory.push(currentLatency);
+                            
+                            // Keep only the last maxLatencyHistory measurements
+                            if (latencyHistory.length > maxLatencyHistory) {
+                                latencyHistory.shift(); // Remove oldest measurement
+                            }
+                            
                             updateLatencyDisplay();
                         }
                     } catch (error) {

@@ -8,8 +8,8 @@ APP_CERTIFICATE = "db2813337e8b46bcb271cd544f19bd63"  # Primary certificate
 
 # Token Configuration for secure channels
 USE_TOKEN = True  # Set to True when using tokens
-TOKEN = "007eJxTYJDtrJx+4bSolsfi82c525m+m86doGN+c6ZLbpecAUd41goFhhTDJGMLw7RUE0tTUxPz5GQLM/NEYxPjZMPU5NTUNNMUL9vejIZARgZd3mUMjFAI4vMz5CWWpOoW5aXoGpkaWBgYMjAAAAsIH8Y="
-TOKEN_CHANNEL = "nate-rnd-250801"  # Channel name for the token
+TOKEN = "007eJxTYJD7UxMYwmq62WDvmX+iQpkHJW5veC207X3kJd5VXd1Zp+IUGFIMk4wtDNNSTSxNTU3Mk5MtzMwTjU2Mkw1Tk1NT00xTrB5NyGgIZGRYv9+ZkZEBAkF8foa8xJJU3aK8FF0jUwMLAxMGBgDySyNg"
+TOKEN_CHANNEL = "nate-rnd-250804"  # Channel name for the token
 
 # Channel Configuration
 CHANNEL_PREFIX = "robot_cam_"  # Prefix for video channels
