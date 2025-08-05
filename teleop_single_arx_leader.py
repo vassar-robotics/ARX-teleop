@@ -123,7 +123,8 @@ class NetworkMonitor:
             
         avg_latency = sum(self.latencies) / len(self.latencies)
         max_latency = max(self.latencies)
-        packet_loss = 1 - (self.ack_count / self.sent_count) if self.sent_count > 0 else 0
+        expected_acks = self.sent_count // 5  # Only every 5th packet expects ack
+        packet_loss = 1 - (self.ack_count / expected_acks) if expected_acks > 0 else 0
         
         return {
             "avg_latency": avg_latency,
