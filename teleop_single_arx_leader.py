@@ -355,7 +355,7 @@ def main():
                        help="Comma-separated motor IDs")
     parser.add_argument("--baudrate", type=int, default=1000000,
                        help="Serial baudrate")
-    parser.add_argument("--fps", type=int, default=60,
+    parser.add_argument("--fps", type=int, default=20,
                        help="Target update rate (Hz)")
     
     args = parser.parse_args()
