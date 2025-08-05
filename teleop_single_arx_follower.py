@@ -281,9 +281,10 @@ class ARXArmWrapper:
                 elif motor_id == 7:  # Gripper
                     gripper_position = tic_pos
                     
-            # Set arm joint positions (6 joints)
+            # Apply position smoothing to arm joints
             if len(arm_positions) == 6:
-                self.arm.set_joint_positions(arm_positions)
+                smoothed_positions = self.smoother.smooth(arm_positions)
+                self.arm.set_joint_positions(smoothed_positions)
                 
             # Set gripper position if present
             if gripper_position is not None:

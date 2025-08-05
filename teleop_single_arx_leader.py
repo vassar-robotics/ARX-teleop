@@ -150,7 +150,8 @@ class StatusListener(SubscribeCallback):
             timestamp = data.get("timestamp")
             if sequence is not None and timestamp is not None:
                 latency = self.monitor.message_acknowledged(sequence, timestamp)
-                logger.debug(f"Received ack for seq {sequence}, latency: {latency:.1f}ms")
+                if latency is not None:
+                    logger.debug(f"Received ack for seq {sequence}, latency: {latency:.1f}ms")
                 if latency and latency > pubnub_config.LATENCY_WARNING_MS:
                     logger.warning(f"{Fore.YELLOW}High latency: {latency:.1f}ms{Style.RESET_ALL}")
                 
