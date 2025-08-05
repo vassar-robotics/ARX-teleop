@@ -94,8 +94,14 @@ class ARXArm:
 
         # Initialize the arm interface
         can_port = config.get("can_port", "can0")
-        self.arm = arx.InterfacesPy(urdf_path, can_port, robot_type)
-        self.arm.arx_x(500, 2000, 10)
+        
+        # Suppress ARX library output (Chinese characters)
+        import sys
+        from contextlib import redirect_stdout, redirect_stderr
+        with open(os.devnull, 'w') as devnull:
+            with redirect_stdout(devnull), redirect_stderr(devnull):
+                self.arm = arx.InterfacesPy(urdf_path, can_port, robot_type)
+                self.arm.arx_x(500, 2000, 10)
 
     def go_home(self) -> bool:
         """

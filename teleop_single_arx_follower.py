@@ -281,10 +281,9 @@ class ARXArmWrapper:
                 elif motor_id == 7:  # Gripper
                     gripper_position = tic_pos
                     
-            # Apply position smoothing to arm joints
+            # Set arm joint positions (6 joints)
             if len(arm_positions) == 6:
-                smoothed_positions = self.smoother.smooth(arm_positions)
-                self.arm.set_joint_positions(smoothed_positions)
+                self.arm.set_joint_positions(arm_positions)
                 
             # Set gripper position if present
             if gripper_position is not None:
@@ -294,6 +293,49 @@ class ARXArmWrapper:
             
         except Exception as e:
             logger.error(f"Error writing joint positions: {e}")
+            
+    def write_joint_tics_smoothed(self, positions: Dict[int, int], smoother):
+        """Write joint positions with smoothing applied to arm joints."""
+        if not self.connected or not self.arm:
+            return
+            
+        try:
+            # Separate arm joints (1-6) from gripper (7)
+            arm_positions = np.zeros(6)  # 6 joints for ARX R5 arm
+            gripper_position = None
+            
+            for motor_id, tic_pos in positions.items():
+                if 1 <= motor_id <= 6:  # Arm joints
+                    # Get calibrated center for this motor
+                    servo_center = self.servo_centers.get(motor_id, 2048)
+                    
+                    # Check if this motor should be inverted
+                    if motor_id in self.invert_motors:
+                        # Inverted: flip motion around center point
+                        rad_pos = (servo_center - tic_pos) * self.servo_to_radian_scale
+                        logger.debug(f"Motor {motor_id} inverted: {tic_pos} -> {rad_pos:.3f}")
+                    else:
+                        # Normal: standard conversion
+                        rad_pos = (tic_pos - servo_center) * self.servo_to_radian_scale
+                        
+                    arm_positions[motor_id - 1] = rad_pos  # Convert to 0-indexed
+                    
+                elif motor_id == 7:  # Gripper
+                    gripper_position = tic_pos
+                    
+            # Apply smoothing to arm joint positions (in radians)
+            if len(arm_positions) == 6:
+                smoothed_positions = smoother.smooth(arm_positions)
+                self.arm.set_joint_positions(smoothed_positions)
+                
+            # Set gripper position if present
+            if gripper_position is not None:
+                gripper_cmd = self._convert_gripper_tics_to_cmd(gripper_position)
+                logger.debug(f"Gripper: tics={gripper_position} -> cmd={gripper_cmd:.3f}")
+                self.arm.set_catch_pos(gripper_cmd)
+            
+        except Exception as e:
+            logger.error(f"Error writing smoothed joint positions: {e}")
             
     def _convert_gripper_tics_to_cmd(self, tic_pos: int) -> float:
         """Convert gripper servo tics to ARX gripper command (-1.0 to 1.0).
@@ -477,8 +519,8 @@ class SingleFollowerTeleop:
                 
             logger.debug(f"Writing positions to ARX arm: {motor_positions}")
             
-            # Apply positions to ARX arm using the wrapper
-            self.follower.write_joint_tics(motor_positions)
+            # Apply positions to ARX arm with smoothing
+            self.follower.write_joint_tics_smoothed(motor_positions, self.smoother)
             
         except Exception as e:
             logger.error(f"Error applying positions: {e}")
