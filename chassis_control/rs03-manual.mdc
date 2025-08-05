@@ -1,0 +1,569 @@
+---
+description: Manual excerpts describing the RobStride RS03 actuator and its communication protocol. This protocol also applies to other RobStride actuators (e.g. RS04 or RS02).
+alwaysApply: false
+---
+# RS03 Instruction Manual (RS03-EN)
+
+## Motor specification
+
+### Outline and mounting dimensions
+
+```mermaid
+graph TD
+    subgraph Mechanical Drawing Description
+        A[Overview] --> B(This figure shows the mechanical outline and mounting dimensions of the RS03 motor from three perspectives: Front, Side, and Rear views.);
+
+        subgraph Front View Details
+            E[Outer Diameter: Ø100]
+            F[Outer Mounting: 8-M4 EQ.SP on Ø90±0.2 PCD]
+            G[Inner Mounting: 8-M4 EQ.SP indicated]
+            H[Various inner diameters and alignment features are shown, including Ø60±0.2 and Ø36±0.2]
+            J[Alignment Feature: 3x Ø4(0.005) Depth 16.1]
+        end
+
+        subgraph Side View Details
+            K[Total Width indicated as 54.11 in one dimension line]
+            L[Width of a major section indicated as 39.51]
+            M[Flange/Step Thickness indicated as 7.5]
+            N[Diameter indicated as Ø100.1]
+            O[Another width dimension indicated as 30.36±0.2 (Note: Conflicts with 54.11 dimension in the image)]
+        end
+
+        subgraph Rear View Details
+            P[Diameter Feature: Ø79.51]
+            Q[Shows the rear profile and the 8 outer mounting holes.]
+        end
+    end
+```
+*Figure: Outline and mounting dimensions.*
+
+**Note:** When fixing, the screw depth should not exceed the depth of the casing thread.
+
+### Standard usage status
+
+1. Rated voltage: 48 VDC
+2. Operating voltage range: 24V-60 VDC
+3. Rated load (CW): 20 N.m
+4. Operation direction: CW/CCW from the direction of the exit shaft
+5. Use posture: the direction of the exit axis is horizontal or vertical
+6. Standard operating temperature: $25\pm5^{\circ}C$
+7. Operating temperature range: $-20\sim50^{\circ}C$
+8. Standard operating humidity: 65%
+9. Humidity range: $5\sim85\%$ no condensation
+10. Storage temperature range: $-30\sim70^{\circ}C$
+11. Insulation Class: Class B
+
+### Electrical characteristics
+
+1. No load speed: $200~rpm\pm10\%$
+2. No load current: 2 Arms
+3. Rated load: 20 N.m
+4. Rated load speed: $180rpm \pm10\%$
+5. Rated load phase current (peak): 13Apk±10%
+6. Peak load: 60 N.m
+7. Maximum load phase current (peak): $43Apk\pm10\%$
+8. Insulation resistance/stator winding: DC 500VAC, 100M Ohms
+9. High voltage/stator and housing: 600 VAC, 1s, 2mA
+10. Motor back potential: $17Vrms/krpm\pm10\%$
+11. Torque constant: $2.36N.m/Arms$
+
+### 12. T-N curve
+
+```mermaid
+xychart-beta
+    title "T-N Curve (Torque/N.m vs Speed)"
+    x-axis [130, 140, 150, 160, 170, 180, 190, 200]
+    y-axis "Torque (N.m)" 20 --> 70
+    line [
+        [130, 60], [145, 60], [150, 58], [160, 52], [170, 45], [175, 42], [180, 38], [190, 28], [195, 21]
+    ]
+```
+*Description: The T-N curve shows the relationship between Torque (N.m) and Speed (presumably rpm). The torque remains constant at 60 N.m from 130 up to about 145. After this point, the torque decreases as the speed increases, dropping to about 21 N.m at a speed of 195.*
+
+### 13. Maximum overload curve
+
+Test conditions:
+Ambient temperature: $25^{\circ}C$
+Winding limit temperature: $130^{\circ}C$ (this is the constraint temperature, the actual is 180 degrees)
+Speed: 24rpm
+
+```mermaid
+xychart-beta
+    title "Maximum Load Curve (最大负载曲线)"
+    x-axis "LOAD (NM)" 0 --> 70
+    y-axis "OPERATING TIME (S)" 0 --> 200
+    line [
+        [30, 189], [40, 26], [50, 12], [60, 7]
+    ]
+```
+*Description: This graph illustrates the maximum operating time (in seconds) the motor can sustain at various load levels (in N.m) before reaching thermal limits under the specified test conditions. As the load increases, the sustainable operating time decreases sharply.*
+
+#### Test data
+
+| Load (N.m) | Operating time (s) |
+| :--- | :--- |
+| 60 | 7 |
+| 50 | 12 |
+| 40 | 26 |
+| 30 | 189 |
+| 20 | rated |
+
+## Mechanical properties
+
+1. Weight: 880g±20g
+2. Number of poles: 42
+3. Phase number: 3 phases
+4. Drive mode: FOC
+5. Deceleration ratio: 9:1
+
+## Drive product information
+
+### Drive product specifications
+
+| project | data |
+| :--- | :--- |
+| The rated working voltage | 48VDC |
+| The maximum allowable voltage | 60VDC |
+| Rated working phase current | 12Apk |
+| Maximum allowable phase current | 43Apk |
+| Standby power | ≤40mA |
+| CAN bus bit rate | 1Mbps |
+| Dimensions | Ø70mm |
+| Working environment temperature. | -20°C to 50°C |
+| The maximum allowable temperature of the control board | 105°C |
+| encoder resolution | 14bit (absolute turn) |
+
+#### Parameter Table
+
+| function code | name | parameter type | attribute | Maximum value | Minimum value | Current value (for reference) | 备注 (Remarks) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 0X0000 | Name | String | Read/Write | | | | |
+| 0X0001 | BarCode | String | Read/Write | | | (Varies) | |
+| 0X1000 | BootCodeVersion | String | Read only | | | 0.1.5 | |
+| 0X1001 | BootBuildDate | String | Read only | | | Mar 16 2022 | |
+| 0X1002 | BootBuild Time | String | Read only | | | 20:22:09 | |
+| 0X1003 | AppCodeVersion | String | Read only | | | 0.0.0.1 | Motor program version number |
+| 0X1004 | AppGitVersion | String | Read only | | | 76844b0fM | |
+| 0X1005 | AppBuildDate | String | Read only | | | Apr 14 2022 | |
+| 0X1006 | AppBuild Time | String | Read only | | | 20:30:22 | |
+| 0X1007 | AppCodeName | String | Read only | | | Lingzu_motor | |
+| 0X2000 | echoParal | uint16 | disposition | 74 | 5 | 5 | |
+| 0X2001 | echoPara2 | uint16 | disposition | 74 | 5 | 5 | |
+| 0X2002 | echoPara3 | uint16 | disposition | 74 | 5 | 5 | |
+| 0X2003 | echoPara4 | uint16 | disposition | 74 | 5 | 5 | |
+| 0X2004 | echoFreHz | uint32 | Read/Write | 10000 | 1 | 500 | |
+| 0X2005 | MechOffset | float | Settings | 7 | -7 | 4.619583 | Motor magnetic encoder Angle offset |
+| 0X2006 | MechPos_init. | float | Read/Write | 50 | -50 | 4.52 | Reserved parameter |
+| 0X2007 | limit torque | float | Read/Write | 17 | 0 | 17 | Torque limitation |
+| 0X2008 | LFW_MAX | float | Read/Write | 33 | 0 | 0 | Weak magnetic current value, default 0 |
+| 0X2009 | motor_baud | uint8 | Settings | 20 | 0 | 1 | Motor index, marking the joint position of the motor |
+| 0X200a | CAN ID | uint8 | Settings | 127 | 0 | 1 | id of this object |
+| 0X200b | CAN_MASTER | uint8 | Settings | 127 | 0 | 0 | can host id |
+| 0X200c | CAN TIMEOUT | uint32 | Read/Write | 100000 | 0 | 0 | can timeout threshold. The default value is 0 |
+| 0X200d | status2 | int16 | Read/Write | 1500 | 0 | 800 | Reserved parameter |
+| 0X200e | status3 | uint32 | Read/Write | 1000000 | 1000 | 20000 | Reserved parameter |
+| 0X200f | statusl | float | Read/Write | 64 | 1 | 7.75 | Reserved parameter |
+| 0X2010 | Status6 | uint8 | Read/Write | 1 | 0 | 1 | Reserved parameter |
+| 0X2011 | cur_filt_gain | float | Read/Write | 1 | 0 | 0.9 | Current filtering parameter |
+| 0X2012 | cur_kp | float | Read/Write | 200 | 0 | 0.025 | Current kp |
+| 0X2013 | cur_ki | float | Read/Write | 200 | 0 | 0.0258 | Current ki |
+| 0X2014 | spd_kp | float | Read/Write | 200 | 0 | 2 | Velocity kp |
+| 0X2015 | spd_ki | float | Read/Write | 200 | 0 | 0.021 | Speed ki |
+| 0X2016 | loc_kp | float | Read/Write | 200 | 0 | 30 | Position kp |
+| 0X2017 | spd_filt_gain | float | Read/Write | 1 | 0 | 0.1 | Velocity filter parameter |
+| 0X2018 | limit_spd | float | Read/Write | 200 | 0 | 2 | Location mode speed limit |
+| 0X2019 | limit cur | float | Read/Write | 23 | 0 | 23 | Position, Velocity mode current limit |
+| 0X201a | loc_ref_filt_gain | float | Read/Write | 100 | 0 | 0 | Reserved parameter |
+| 0X201b | limit loc | float | Read/Write | 100 | 0 | 0 | Reserved parameter |
+| 0X201c | position_offset | float | Read/Write | 27 | 0 | 0 | High speed segment offset |
+| 0X201d | chasu_angle_offset | float | Read/Write | 27 | 0 | 0 | The low end is offset |
+| 0X201e | spd_step_value | float | Read/Write | 150 | 0 | | Velocity-mode acceleration |
+| 0X201f | vel_max | float | Read/Write | 20 | 0 | | PP mode speed |
+| 0X2020 | acc_set | float | Read/Write | 1000 | 0 | | PP mode acceleration |
+| 0X2021 | zero sta | float | Read/Write | 100 | 0 | 0 | Zero marker |
+| 0X3000 | timeUseO | uint16 | Read only | | | 5 | |
+| 0X3001 | timeUse1 | uint16 | Read only | | | 0 | |
+| 0X3002 | timeUse2 | uint16 | Read only | | | 10 | |
+| 0X3003 | timeUse3 | uint16 | Read only | | | 0 | |
+| 0X3004 | encoderRaw | Int16. | Read only | | | 11396 | Magnetic encoder sampling value |
+| 0X3005 | mcuTemp | Int16. | Read only | | | 337 | mcu internal temperature |
+| 0X3006 | motorTemp | int16 | Read only | | | 333 | Motor ntc temperature |
+| 0X3007 | vBus(mv) | uint16 | Read only | | | 24195 | Bus voltage |
+| 0X3008 | adc1Offset | int32 | Read only | | | 2084 | adc sampling channel 1 Zero current bias |
+| 0X3009 | adc2Offset | Int32 | Read only | | | 2084 | adc sampling channel 2 Zero current bias |
+| 0X300a | adc1Raw | uint16 | Read only | | | 1232 | adc sampling value 1 |
+| 0X300b | adc2Raw | uint16 | Read only | | | 1212 | adc sampling value 2 |
+| 0X300c | VBUS | float | Read only | | | 36 | Bus voltage V |
+| 0X300d | cmdId | float | Read only | | | 0 | id ring instruction, A |
+| 0X300e | cmdIq | float | Read only | | | 0 | iq ring command, A |
+| 0X300f | cmdlocref | float | Read only | | | 0 | Position loop command, rad |
+| 0X3010 | cmdspdref | float | Read only | | | 0 | Speed loop command, rad |
+| 0X3011 | cmdTorque | float | Read only | | | 0 | Torque instruction, nm |
+| 0X3012 | cmdPos | float | Read only | | | 0 | mit Protocol Angle instruction |
+| 0X3013 | cmdVel | float | Read only | | | 0 | mit Protocol Speed instruction |
+| 0X3014 | rotation | int16 | Read only | | | 1 | Number of turns |
+| 0X3015 | modPos | float | Read only | | | 4.363409 | Motor uncounted coil mechanical Angle, rad |
+| 0X3016 | mechPos | float | Read only | | | 0.777679 | Load end loop mechanical Angle, rad |
+| 0X3017 | mechVel | float | Read only | | | 0.036618 | Load speed: rad/s |
+| 0X3018 | elecPos | float | Read only | | | 4.714761 | Electrical Angle |
+| 0X3019 | ia | float | Read only | | | 0 | U-wire current A |
+| 0X301a | ib | float | Read only | | | 0 | V-wire current A |
+| 0X301b | ic | float | Read only | | | 0 | W-wire current A |
+| 0X301c | timeout | uint32 | Read only | | | 31600 | Timeout count value |
+| 0X301d | phase Order | uint8 | Read only | | | 0 | Directional marking |
+| 0X301e | iqf | float | Read only | | | 0 | iq filter value, A |
+| 0X301f | board Temp | int16 | Read only | | | 359 | Plate temperature, *10 |
+| 0X3020 | iq | float | Read only | | | 0 | iq Original value, A |
+| 0X3021 | id | float | Read only | | | 0 | id Original value. A |
+| 0X3022 | faultSta | uint32 | Read only | | | 0 | Fault status value |
+| 0X3023 | warnSta | uint32 | Read only | | | 0 | Warning status value |
+| 0X3024 | drv fault | uint16 | Read only | | | 0 | The driver chip fault value is 1 |
+| 0X3025 | drv_temp | int16 | Read only | | | 48 | The driver chip fault value is 2 |
+| 0X3026 | Uq | float | Read only | | | 0 | Q-axis voltage |
+| 0X3027 | Ud | float | Read only | | | 0 | D-axis voltage |
+| 0X3028 | dtc_u | float | Read only | | | 0 | The duty cycle of the U-phase output |
+| 0X3029 | dtc v | float | Read only | | | 0 | The duty cycle of the V-phase output |
+| 0X302a | dtc_w | float | Read only | | | 0 | The duty cycle of the W-phase output |
+| 0X302b | v_bus | float | Read only | | | 24.195 | Vbus in the closed loop |
+| 0X302c | torque_fdb | float | Read only | | | 0 | Torque feedback value, nm |
+| 0X302d | rated_i | float | Read only | | | 8 | Rated current motor |
+| 0X302e | limit i | float | Read only | | | 27 | The motor limit the maximum current |
+| 0X302f | spd_ref | float | Read only | | | 0 | Motor speed expectation |
+| 0X3030 | spd_reff | float | Read only | | | 0 | Motor speed expectation 2 |
+| 0X3031 | zero_fault | float | Read only | | | 0 | Motor position determination parameters |
+| 0X3032 | chasu_coder_raw | float | Read only | | | 0 | Motor position determination parameters |
+| 0X3033 | chasu_angle | float | Read only | | | 0 | Motor position determination parameters |
+| 0X3034 | as_angle | float | Read only | | | 0 | Motor position determination parameters |
+| 0X3035 | vel_max | float | Read only | | | 0 | Motor position determination parameters |
+| 0X3036 | judge | float | Read only | | | 0 | Motor position determination parameters |
+| 0X3037 | fault1 | uint32 | Read only | | | 0 | Log failure |
+| 0X3038 | fault2 | uint32 | Read only | | | 0 | Log failure |
+| 0X3039 | fault3 | uint32 | Read only | | | 0 | Log failure |
+| 0X303a | fault4 | uint32 | Read only | | | 0 | Log failure |
+| 0X303b | fault5 | uint32 | Read only | | | 0 | Log failure |
+| 0X303c | fault6 | uint32 | Read only | | | 0 | Log failure |
+| 0X303d | fault7 | uint32 | Read only | | | 0 | Log failure |
+| 0X303e | fault8 | uint32 | Read only | | | 0 | Log failure |
+| 0X303f | ElecOffset | float | Read only | | | 0 | electrical Angle offset |
+| 0X3040 | mcOverTemp | int16 | Read only | | | 0 | Overtemperature threshold |
+| 0X3041 | Kt Nm/Amp | float | Read only | | | 0 | Moment coefficient |
+| 0X3042 | Tqcali_Type | uint8 | Read only | | | 0 | Motor type |
+| 0X3043 | low_position | float | Read only | | | 0 | Motor position determination parameters |
+| 0X3044 | theta_mech_1 | float | Read only | | | 0 | Type 2 Low speed Angle |
+| 0X3045 | instep | float | Read only | | | 0 | Motor protection decision parameters |
+## CAN communication failure protection
+
+## Motor fault instructions
+
+Function code 0x3022 indicates the fault code, where:
+
+*   **bit14:** i²t overload fault: motor blocking overload algorithm protection
+*   **bit7:** Encoder uncalibrated: Motor uncalibrated encoder
+*   **bit3:** Overvoltage fault: the motor voltage exceeds the protection voltage by 60V
+*   **bit2:** Undervoltage fault: the motor voltage is lower than the protection voltage of 12V
+*   **bit1:** Driver chip failure: Motor driver chip failure reported
+*   **bit0:** Motor overtemperature fault: motor thermistor temperature exceeds 145 degrees
+
+Function code 0x3024 is driver chip fault code 1 (DRV8353 Status Register 0). The specific faults are as follows:
+
+| Bit | Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| 10 | FAULT | R | 0b | Logic OR of FAULT status registers. Mirrors nFAULT pin |
+| 9 | VDS_OCP | R | 0b | Indicates VDS monitor overcurrent fault condition |
+| 8 | GDF | R | 0b | Indicates gate drive fault condition |
+| 7 | UVLO | R | 0b | Indicates undervoltage lockout fault condition |
+| 6 | OTSD | R | 0b | Indicates overtemperature shutdown. |
+| 5 | VDS_HA | R | 0b | Indicates VDS overcurrent fault on the A high-side MOSFET |
+| 4 | VDS LA | R | 0b | Indicates VDS overcurrent fault on the A low-side MOSFET |
+| 3 | VDS HB | R | 0b | Indicates VDS overcurrent fault on the B high-side MOSFET |
+| 2 | VDS_LB | R | 0b | Indicates VDS overcurrent fault on the B low-side MOSFET |
+| 1 | VDS HC | R | 0b | Indicates VDS overcurrent fault on the C high-side MOSFET |
+| 0 | VDS LC | R | 0b | Indicates VDS overcurrent fault on the C low-side MOSFET |
+
+Function code 0x3025 is driver chip fault code 2.
+*(Note: The table provided in the PDF for 0x3025 appears identical to the one for 0x3024, likely indicating Status Register 1 or an error in the manual.)*
+
+| Bit | Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| 10 | FAULT | R | 0b | Logic OR of FAULT status registers. Mirrors nFAULT pin. |
+| 9 | VDS OCP | R | 0b | Indicates VDS monitor overcurrent fault condition |
+| 8 | GDF | R | 0b | Indicates gate drive fault condition |
+| 7 | UVLO | R | 0b | Indicates undervoltage lockout fault condition |
+| 6 | OTSD | R | 0b | Indicates overtemperature shutdown |
+| 5 | VDS HA | R | 0b | Indicates VDS overcurrent fault on the A high-side MOSFET |
+| 4 | VDS LA | R | 0b | Indicates VDS overcurrent fault on the A low-side MOSFET |
+| 3 | VDS_HB | R | 0b | Indicates VDS overcurrent fault on the B high-side MOSFET |
+| 2 | VDS LB | R | 0b | Indicates VDS overcurrent fault on the B low-side MOSFET |
+| 1 | VDS HC | R | 0b | Indicates VDS overcurrent fault on the C high-side MOSFET |
+| 0 | VDS_LC | R | 0b | Indicates VDS overcurrent fault on the C low-side MOSFET |
+
+### Control mode switching
+
+The motor control mode can be changed in the motion mode interface.
+
+*   MIT Control
+*   Position Mode (PP)
+*   Velocity Mode
+*   Current Mode
+*   Position Mode (CSP)
+
+### Operation control mode (MIT Control)
+
+```mermaid
+graph TD
+    subgraph Motion Control - MIT Control
+        A(Control Mode: MIT Control)
+        B(Enable Switch)
+        C(Torque (nm) Input)
+        D(Position (rad) Input)
+        E(Velocity (rad/s) Input)
+        F(Kp Input)
+        G(Kd Input)
+        H(Continuously Checkbox)
+        I(<< Start >> Button)
+    end
+```
+*Description: Screenshot showing the MIT Control mode configuration.*
+
+Click the switch button on the right, then set five parameter values, click Start or continuous send, the motor will return the feedback frame and run according to the target instruction; Click the switch button on the right side again, and the motor will stop.
+
+### Current mode
+
+```mermaid
+graph TD
+    subgraph Motion Control - Current Mode
+        A(Control Mode: Current Mode)
+        B(Enable Switch 1)
+        C(Sin signal automated test)
+        D(Enable Switch 2)
+        E(Amplitude: 0.00)
+        F(Frequency: 0.00Hz)
+        G(Iq Command (A): 1.0000)
+        H(<< Send >> Button)
+    end
+```
+*Description: Screenshot showing the Current Mode configuration.*
+
+Manually switch the current mode, click the switch button on the right side, then set the Iq current command value, start or continue to send, the motor will follow the current command.
+**Sinusoidal automatic test:** Enter the amplitude and frequency, then click the switch button on the right side of the sinusoidal automatic test, and the iq (A) of the motor will run according to the settings.
+
+### Velocity mode
+
+```mermaid
+graph TD
+    subgraph Motion Control - Velocity Mode
+        A(Control Mode: Velocity Mode)
+        B(Enable Switch 1)
+        C(Sin signal automated test)
+        D(Enable Switch 2)
+        E(Amplitude: 0.00)
+        F(Frequency: 0.00Hz)
+        G(Current Limit (A): 23.0000)
+        H(Acceleration Setting (rad/s/s): 0.00)
+        I(Velocity Command (rad/s): 0.0000)
+        J(<< Start >> Button)
+    end
+```
+*Description: Screenshot showing the Velocity Mode configuration.*
+
+Manually cut the Velocity mode, click the right switch button, then set the speed command value, start or continue to send, the motor will follow the speed command.
+**Sinusoidal automatic test:** Available for velocity commands.
+
+### Location Mode (CSP)
+
+```mermaid
+graph TD
+    subgraph Motion Control - Position Mode (CSP)
+        A(Control Mode: Position Mode CSP)
+        B(Enable Switch 1)
+        C(Sin signal automated test)
+        D(Enable Switch 2)
+        E(Amplitude: 0.00)
+        F(Frequency: 0.00Hz)
+        G(Velocity Setting (rad/s): 0.0000)
+        H(Position Command (rad): 0.0000)
+        I(Continuously Checkbox)
+        J(Start Button)
+    end
+```
+*Description: Screenshot showing the Position Mode (CSP) configuration.*
+
+Manually switch the position mode (CSP), click the right switch button, then set the position instruction value (rad), start or continuous transmission, the motor will follow the target position instruction. You can set the speed (Velocity Setting) to change the maximum speed for following the position.
+**Sinusoidal automatic test:** Available for position commands.
+
+### Location Mode (PP)
+
+```mermaid
+graph TD
+    subgraph Motion Control - Position Mode (PP)
+        A(Control Mode: Position Mode PP)
+        B(Enable Switch 1)
+        C(Sin signal automated test)
+        D(Enable Switch 2)
+        E(Amplitude: 0.00)
+        F(Frequency: 0.00Hz)
+        G(Velocity Setting (rad/s): 10.0000)
+        H(Acceleration Setting (rad/s^2): 10.00)
+        I(Position Command (rad): 0.0000)
+        J(Continuously Checkbox)
+        K(<< Start >> Button)
+    end
+```
+*Description: Screenshot showing the Position Mode (PP) configuration.*
+
+Manually switch the position mode (PP), click the switch button on the right side, and then set the position instruction value (rad), speed setting instruction value $(rad/s)$, acceleration setting $(rad/s^{\wedge}2)$ to start or continue to send, the motor will follow the target position instruction to run.
+
+## Firmware update
+
+(Button: Update)
+
+First, click Upgrade of device module and select bin file to burn; The second step is to confirm the upgrade, and the motor starts to update the firmware. After the progress is completed, the motor is updated and automatically restarts.
+
+## Explanation of Canopen Communication Protocol Types
+
+### State Machine Description
+
+```mermaid
+graph TD
+    subgraph POWER DISABLED
+        START --> NRTSO[NOT READY TO SWITCH ON]
+        NRTSO -- dashed --> SOD[SWITCH ON DISABLED]
+    end
+
+    subgraph FAULT
+        FRA[FAULT REACTION ACTIVE]
+    end
+
+    subgraph POWER ENABLED
+        RTSO[READY TO SWITCH ON]
+        SO[SWITCHED ON]
+        OE[OPERATION ENABLE]
+        QSA[QUICK STOP ACTIVE]
+    end
+
+    SOD --> RTSO -- 6 --> SOD
+    RTSO --> SO -- 7 --> RTSO
+    SO --> OE -- 15 --> SO
+
+    OE --> SOD -- 1 --> OE
+    %% Transitions also exist from SO/RTSO back to SOD (labeled 15/1 in the diagram)
+
+    OE --> QSA -- 11 --> OE
+    QSA --> OE -- 15 --> QSA
+
+    FRA --> SOD -- 130 (Fault Reset) --> FRA
+```
+*Description: A state machine diagram illustrating the CANopen (CiA 402) device control states and transitions.*
+
+**Motor Enable:**
+
+When initially powered on, the motor defaults to the `SWITCH_ON_DISABLED` state. To transition to `OPERATION_ENABLE`, modify the Controlword (6040H) to 6, 7, then 15 (step-by-step transition), or directly set it to 15 for immediate enablement.
+
+**Stopping the Motor:**
+
+If the motor is in `OPERATION_ENABLE` state and needs to stop normally, modify the Controlword (6040H) to 1 (Disable Voltage) or 6 (Shutdown). The motor will return to the disabled state.
+
+**Emergency Stop (Use with Caution-Risk of Voltage Surge):**
+
+During operation, an emergency stop can be triggered by setting the Controlword (6040H) to 11 (Quick Stop).
+
+**Fault Clearance:**
+
+If the motor enters a FAULT state, modifying the Controlword (6040H) (Fault Reset bit) can clear standard errors.
+
+**Important Note:**
+
+Mode changes for this motor must be performed in the disabled state (`SWITCH_ON_DISABLED`). Ensure the desired mode is configured before enabling `OPERATION_ENABLE` to avoid unexpected behavior.
+
+### Status Feedback Parameters
+
+| Index | Name | Attribute | Type | Unit |
+| :--- | :--- | :--- | :--- | :--- |
+| 603F | Error_code | Read-only | UINTEGER16 | / |
+| 6041 | Statusword | Read-only | UINTEGER16 | / |
+| 6061 | Modes_of_operation_display | Read-only | INTEGER8 | |
+| 6062 | Position_demand_value | Read-only | INTEGER32 | Pulses (1 rev=16,384 pulses) |
+| 6064 | Position_actual_value | Read-only | INTEGER32 | Pulses (1 rev=16,384 pulses) |
+| 606B | Velocity_demand_value | Read-only | INTEGER32 | 0.1 rpm |
+| 606C | Velocity_actual_value | Read-only | INTEGER32 | 0.1 rpm |
+| 6077 | Torque_actual_value | Read-only | INTEGER16 | 0.1% load ratio (1000=20 N·m) |
+| 6078 | Current_actual_value | Read-only | INTEGER16 | mA |
+| 6079 | DC_link_circuit_voltage | Read-only | INTEGER32 | mV |
+
+### Homing Mode (Zero Position Setting)
+
+| Index | Name | Attribute | Type |
+| :--- | :--- | :--- | :--- |
+| 6040 | Controlword | Read-write | UINTEGER16 |
+| 6060 | Modes of operation | Read-write | INTEGER8 |
+
+**Homing method:**
+
+Set Modes of operation (6060H) to 6 while the motor is disabled (`SWITCH_ON_DISABLED`). The motor will define the current position as the zero point. Modify the Controlword (6040H) to 15 to enable and hold the zero position.
+
+### Position Mode (PP - Profile Position)
+
+| Index | Name | Attribute | Type | Unit |
+| :--- | :--- | :--- | :--- | :--- |
+| 6040 | Controlword | Read-write | UINTEGER16 | / |
+| 6060 | Modes of operation | Read-write | INTEGER8 | |
+| 6067 | Position_window | Read-write | UINTEGER32 | Pulses |
+| 6068 | Position_window_time | Read-write | UINTEGER16 | ms |
+| 6071 | Target_torque (Max Torque) | Read-write | INTEGER16 | 0.1% load ratio |
+| 607A | Target position | Read-write | INTEGER32 | Pulses |
+| 6081 | Profile_velocity | Read-write | UINTEGER32 | 0.1 rpm |
+| 6083 | Profile_acceleration | Read-write | UINTEGER32 | 0.1 rpm/s |
+
+**Steps to Configure Position Mode (PP):**
+
+1. While disabled, set Modes of operation (6060H) to 1.
+2. Configure mandatory parameters: `Target_torque`, `Profile_velocity`, `Profile_acceleration`.
+3. Set Controlword (6040H) to 15 to enable operation.
+4. Set `Target_position` (607AH) to move the motor.
+
+### Position Mode (CSP - Cyclic Synchronous Position)
+
+| Index | Name | Attribute | Type | Unit |
+| :--- | :--- | :--- | :--- | :--- |
+| 6040 | Controlword | Read-write | UINTEGER16 | / |
+| 6060 | Modes of operation | Read-write | INTEGER8 | |
+| 6071 | Target_torque (Max Torque) | Read-write | INTEGER16 | 0.1% load ratio |
+| 607A | Target_position | Read-write | INTEGER32 | Pulses |
+| 6081 | Profile velocity (Max Speed) | Read-write | UINTEGER32 | 0.1 rpm |
+
+**Steps to Configure Position Mode (CSP):**
+
+1. While disabled, set Modes of operation (6060H) to 5. (Note: Standard CiA 402 CSP is mode 8; this implementation uses 5).
+2. Configure mandatory parameters: `Target_torque`, `Profile_velocity`.
+3. Set Controlword (6040H) to 15 to enable operation.
+4. Set `Target_position` (607AH) cyclically.
+
+### Velocity Mode
+
+| Index | Name | Attribute | Type | Unit |
+| :--- | :--- | :--- | :--- | :--- |
+| 6040 | Controlword | Read-write | UINTEGER16 | / |
+| 6060 | Modes of operation | Read-write | INTEGER8 | |
+| 6071 | Target_torque (Max Torque) | Read-write | INTEGER16 | 0.1% load ratio |
+| 60FF | Target_velocity | Read-write | INTEGER32 | 0.1 rpm |
+
+**Steps to Configure Velocity Mode:**
+
+1. While disabled, set Modes of operation (6060H) to 3.
+2. Configure mandatory parameter: `Target_torque`.
+3. Set Controlword (6040H) to 15 to enable operation.
+4. Set `Target_velocity` (60FFH) to reach the desired speed.
+
+### Torque Mode
+
+| Index | Name | Attribute | Type | Unit |
+| :--- | :--- | :--- | :--- | :--- |
+| 6040 | Controlword | Read-write | UINTEGER16 | / |
+| 6060 | Modes of operation | Read-write | INTEGER8 | / |
+| 6071 | Target_torque | Read-write | INTEGER16 | 0.1% load ratio |
+
+**Steps to Configure Torque Mode:**
+
+1. While disabled, set Modes of operation (6060H) to 4.
+2. Set Controlword (6040H) to 15 to enable operation.
+3. Set `Target_torque` (6071H) to output the desired torque.
