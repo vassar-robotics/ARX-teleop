@@ -389,14 +389,18 @@ class TelemetryListener(SubscribeCallback):
             data = message.message
                 
             if isinstance(data, dict) and data.get("type") == "telemetry":
+                sequence = data.get("sequence", 0)
+                
+                # Only count as dropped if we actually missed messages (not just overwrites)
+                if self.last_sequence > 0 and sequence > self.last_sequence + 1:
+                    missed = sequence - self.last_sequence - 1
+                    # Only count as dropped if we have pending data that would be overwritten
+                    if self.latest_data is not None:
+                        self.dropped_count += missed
+                
                 self.latest_data = data
                 self.last_receive_time = time.time()
                 self.received_count += 1
-                
-                # Check for dropped packets
-                sequence = data.get("sequence", 0)
-                if self.last_sequence > 0 and sequence > self.last_sequence + 1:
-                    self.dropped_count += sequence - self.last_sequence - 1
                 self.last_sequence = sequence
                 
         except Exception as e:
@@ -464,7 +468,7 @@ class SingleFollowerTeleop:
                 "timestamp": timestamp,
                 "follower_id": f"follower-{platform.node()}"
             }
-            self.pubnub.publish().channel(pubnub_config.STATUS_CHANNEL).message(ack_msg).sync()
+            self.pubnub.publish().channel(pubnub_config.STATUS_CHANNEL).message(ack_msg).pn_async(lambda result, status: None)
         except:
             pass  # Don't fail on ack errors
             
@@ -502,8 +506,9 @@ class SingleFollowerTeleop:
             logger.warning(f"{Fore.RED}Rejecting data: latency {latency:.1f}ms > {pubnub_config.MAX_LATENCY_MS}ms{Style.RESET_ALL}")
             return
             
-        # Send acknowledgment
-        self.send_acknowledgment(sequence, timestamp)
+        # Send acknowledgment (only every 5th message to reduce traffic)
+        if sequence % 5 == 0:
+            self.send_acknowledgment(sequence, timestamp)
         
         # SIMPLIFIED: Direct position application for single arm
         if not self.follower or not self.follower.connected:

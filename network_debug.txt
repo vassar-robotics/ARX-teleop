@@ -360,3 +360,6 @@ ARX方舟无限
 ARX方舟无限
 ARX方舟无限
 ARX方舟无限
+
+Additional details:
+Both computers are on the same wifi network, sitting right next to eachother, but they're not networked together in any special way; they're using the pubnub servers.

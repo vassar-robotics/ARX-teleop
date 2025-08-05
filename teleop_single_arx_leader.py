@@ -232,8 +232,8 @@ class SingleLeaderTeleop:
         }
         
         try:
-            # Publish to telemetry channel
-            self.pubnub.publish().channel(pubnub_config.TELEMETRY_CHANNEL).message(message).sync()
+            # Publish to telemetry channel (async to prevent blocking)
+            self.pubnub.publish().channel(pubnub_config.TELEMETRY_CHANNEL).message(message).pn_async(lambda result, status: None)
             self.monitor.message_sent(self.sequence)
             
             # Track publish rate
