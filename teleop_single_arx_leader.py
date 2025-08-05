@@ -70,7 +70,7 @@ except ImportError:
 
 # Import our modules
 import pubnub_config
-from teleoperate_multi_arms_standalone import SO101Controller, find_robot_ports, identify_robot_by_voltage
+from servo_controller import SO101Controller
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -202,29 +202,6 @@ class SingleLeaderTeleop:
         self.pubnub.subscribe().channels([pubnub_config.STATUS_CHANNEL]).execute()
         
         logger.info(f"{Fore.GREEN}✓ PubNub connected as {pnconfig.user_id}{Style.RESET_ALL}")
-        
-    # COMMENTED OUT - Auto-detection logic (uncomment to re-enable)
-    # def auto_detect_leader(self) -> str:
-    #     """Find and identify the single leader robot."""
-    #     ports = find_robot_ports()
-    #     leader_port = None
-    #     
-    #     logger.info(f"Found {len(ports)} serial ports")
-    #     
-    #     for port in ports:
-    #         try:
-    #             is_leader, voltage = identify_robot_by_voltage(port, self.motor_ids)
-    #             if is_leader:
-    #                 leader_port = port
-    #                 logger.info(f"{Fore.GREEN}✓ Leader robot found at {port} ({voltage:.1f}V){Style.RESET_ALL}")
-    #                 break
-    #         except Exception as e:
-    #             logger.warning(f"Failed to identify {port}: {e}")
-    #             
-    #     if leader_port is None:
-    #         raise RuntimeError("No leader robot found")
-    #         
-    #     return leader_port
         
     def connect_leader(self):
         """Connect to the single leader robot."""

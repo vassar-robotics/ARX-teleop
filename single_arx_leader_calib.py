@@ -44,45 +44,8 @@ except ImportError:
 CALIBRATION_FILE = "arx_leader_calibration.json"
 
 
-def find_robot_ports() -> List[str]:
-    """Find USB serial ports that are likely to be robot/motor controllers."""
-    try:
-        from serial.tools import list_ports
-    except ImportError:
-        logger.error("pyserial not installed. Please install with: pip install pyserial")
-        return []
-    
-    robot_ports = []
-    
-    if platform.system() == "Darwin":  # macOS
-        for port in list_ports.comports():
-            if "usbmodem" in port.device or "usbserial" in port.device:
-                robot_ports.append(port.device)
-    elif platform.system() == "Linux":
-        for port in list_ports.comports():
-            if "ttyUSB" in port.device or "ttyACM" in port.device:
-                robot_ports.append(port.device)
-    elif platform.system() == "Windows":
-        for port in list_ports.comports():
-            if "COM" in port.device:
-                robot_ports.append(port.device)
-    
-    return robot_ports
-
-
-def auto_detect_port() -> str:
-    """Automatically detect a single robot port."""
-    ports = find_robot_ports()
-    
-    if len(ports) == 0:
-        raise RuntimeError("No robot ports detected. Please ensure your device is connected via USB.")
-    elif len(ports) == 1:
-        logger.info(f"Auto-detected port: {ports[0]}")
-        return ports[0]
-    else:
-        logger.info(f"Multiple ports detected: {ports}")
-        logger.info("Using the first port. To use a different port, specify it with --port")
-        return ports[0]
+# HARDCODED PORT - Change this to match your setup
+LEADER_PORT = "/dev/tty.usbmodem5A460813891"
 
 
 class LeaderArmCalibrator:
@@ -403,14 +366,8 @@ def main():
     logger.info(f"Using motor IDs: {motor_ids}")
     
     # Determine port
-    if args.port:
-        port = args.port
-    else:
-        try:
-            port = auto_detect_port()
-        except RuntimeError as e:
-            logger.error(str(e))
-            return 1
+    port = args.port if args.port else LEADER_PORT
+    logger.info(f"Using port: {port}")
     
     # Create calibrator
     calibrator = LeaderArmCalibrator(port, motor_ids, args.baudrate)
