@@ -373,7 +373,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     
     parser = argparse.ArgumentParser(description="Single-arm leader-side teleoperation via PubNub")
-    parser.add_argument("--motor_ids", type=str, default="2,3,4,5,6,7",  # Skip motor 1 for now - it's not responding properly
+    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7",  # All 7 motors: 1-6 for arm joints, 7 for gripper
                        help="Comma-separated motor IDs")
     parser.add_argument("--baudrate", type=int, default=1000000,
                        help="Serial baudrate")

@@ -83,7 +83,7 @@ class ARXPositionSmoother:
     
     def __init__(self, smoothing_factor: float = 0.8):
         self.smoothing_factor = smoothing_factor
-        self.current_positions = np.zeros(7)  # 7 joints for ARX R5
+        self.current_positions = np.zeros(6)  # 6 arm joints for ARX R5 (gripper handled separately)
         self.initialized = False
         
     def smooth(self, target_positions: np.ndarray) -> np.ndarray:
@@ -124,7 +124,7 @@ class ARXArmWrapper:
         self.arm_config = {
             "can_port": can_port,
             "type": robot_type,
-            "num_joints": 7,  # Updated: 7 joints for ARX R5
+            "num_joints": 6,  # 6 arm joints for ARX R5 (gripper handled separately)
         }
         self.arm = None
         self.connected = False
@@ -207,20 +207,29 @@ class ARXArmWrapper:
         
         Returns:
             Dict mapping motor ID to position in tics
+            Motors 1-6: Arm joint positions
+            Motor 7: Gripper position
         """
         if not self.connected or not self.arm:
             return {}
             
         try:
-            joint_positions = self.arm.get_joint_positions()  # Returns radians
-            # Convert back to SO101-style tics for consistency
+            # Read arm joint positions (6 joints)
+            joint_positions = self.arm.get_joint_positions()  # Returns radians for 6 joints
             tics = {}
-            for i, pos_rad in enumerate(joint_positions[:7]):  # 7 joints
+            
+            # Convert arm joints (1-6) back to tics
+            for i, pos_rad in enumerate(joint_positions[:6]):  # 6 arm joints
                 motor_id = i + 1  # Motor IDs are 1-indexed
                 servo_center = self.servo_centers.get(motor_id, 2048)
                 # Convert radians to tic position using calibrated center
                 tic_pos = int(pos_rad / self.servo_to_radian_scale + servo_center)
                 tics[motor_id] = tic_pos
+                
+            # Note: ARX SDK doesn't provide a way to read gripper position
+            # So we can't include motor 7 in the return dict for now
+            # If needed, we could track the last sent gripper position
+            
             return tics
         except Exception as e:
             logger.error(f"Error reading joint positions: {e}")
@@ -231,27 +240,65 @@ class ARXArmWrapper:
         
         Args:
             positions: Dict mapping motor ID to position in tics
+                      Motors 1-6: Arm joints (sent to set_joint_positions)
+                      Motor 7: Gripper (sent to set_catch_pos)
         """
         if not self.connected or not self.arm:
             return
             
         try:
-            # Convert SO101 tic positions to ARX joint positions (radians)
-            joint_positions = np.zeros(7)  # 7 joints for ARX R5
+            # Separate arm joints (1-6) from gripper (7)
+            arm_positions = np.zeros(6)  # 6 joints for ARX R5 arm
+            gripper_position = None
             
             for motor_id, tic_pos in positions.items():
-                if 1 <= motor_id <= 7:  # Valid motor IDs for 7-joint arm
+                if 1 <= motor_id <= 6:  # Arm joints
                     # Get calibrated center for this motor
                     servo_center = self.servo_centers.get(motor_id, 2048)
                     # Convert tic to radians using calibrated center
                     rad_pos = (tic_pos - servo_center) * self.servo_to_radian_scale
-                    joint_positions[motor_id - 1] = rad_pos  # Convert to 0-indexed
+                    arm_positions[motor_id - 1] = rad_pos  # Convert to 0-indexed
                     
-            # Set joint positions on ARX arm
-            self.arm.set_joint_positions(joint_positions)
+                elif motor_id == 7:  # Gripper
+                    gripper_position = tic_pos
+                    
+            # Set arm joint positions (6 joints)
+            if len(arm_positions) == 6:
+                self.arm.set_joint_positions(arm_positions)
+                
+            # Set gripper position if present
+            if gripper_position is not None:
+                gripper_cmd = self._convert_gripper_tics_to_cmd(gripper_position)
+                logger.debug(f"Gripper: tics={gripper_position} -> cmd={gripper_cmd:.3f}")
+                self.arm.set_catch_pos(gripper_cmd)
             
         except Exception as e:
             logger.error(f"Error writing joint positions: {e}")
+            
+    def _convert_gripper_tics_to_cmd(self, tic_pos: int) -> float:
+        """Convert gripper servo tics to ARX gripper command (-1.0 to 1.0).
+        
+        Args:
+            tic_pos: Servo position in tics
+            
+        Returns:
+            float: Gripper command (-1.0 = fully closed, 0.0 = neutral, 1.0 = fully open)
+        """
+        # Get calibrated center position for gripper (motor 7)
+        servo_center = self.servo_centers.get(7, 2048)
+        
+        # Define gripper range in tics (adjust this based on your gripper's actual range)
+        # This assumes ±1000 tics from center gives full gripper range
+        max_gripper_range = 1000.0
+        
+        # Calculate offset from center
+        offset = tic_pos - servo_center
+        
+        # Map to -1.0 to 1.0 range, with clamping
+        gripper_cmd = offset / max_gripper_range
+        gripper_cmd = max(-1.0, min(1.0, gripper_cmd))  # Clamp to valid range
+        
+        return gripper_cmd
 
 
 class TelemetryListener(SubscribeCallback):
@@ -366,7 +413,7 @@ class SingleFollowerTeleop:
                 "type": "status",
                 "timestamp": time.time(),
                 "follower_id": f"follower-{platform.node()}",
-                "motors_active": 7,  # Updated: 7 motors for ARX R5
+                "motors_active": 7,  # 6 arm joints + 1 gripper for ARX R5
                 "followers_connected": 1  # Single follower
             }
             self.pubnub.publish().channel(pubnub_config.STATUS_CHANNEL).message(status_msg).sync()
@@ -427,7 +474,7 @@ class SingleFollowerTeleop:
         print(f"{Style.BRIGHT}Connected Follower:{Style.RESET_ALL}")
         if self.follower:
             print(f"  ARX R5 - {'Connected' if self.follower.connected else 'Disconnected'}")
-            print(f"  Motors: 7 joints")  # Updated motor count reference
+            print(f"  Motors: 6 arm joints + 1 gripper")  # ARX R5 architecture
         print()
         
         # Network stats
