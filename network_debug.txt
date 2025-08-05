@@ -330,3 +330,33 @@ round-trip min/avg/max/stddev = 11.598/31.301/165.837/31.879 ms
 
 
 Follower arm networking information:
+
+== SINGLE ARM ARX FOLLOWER TELEOPERATION ===
+Connected Follower:
+  ARX R5 - Connected
+  Motors: 6 arm joints + 1 gripper
+
+Network Statistics:
+  Average Latency: 57.7ms
+  Max Latency:     81.7ms
+  Received:        740
+  Dropped:         8
+  Update Rate:     37.4 Hz
+  Status:          Connected (last data 0.0s ago)
+
+Press Ctrl+C to stop
+ARX方舟无限
+ARX方舟无限
+ARX方舟无限
+^CINFO: 
+
+⚠️  Shutdown requested. Cleaning up...
+INFO: Returning ARX arm to home position...
+ARX方舟无限
+ARX方舟无限
+ARX方舟无限
+ARX方舟无限
+ARX方舟无限
+ARX方舟无限
+ARX方舟无限
+ARX方舟无限
