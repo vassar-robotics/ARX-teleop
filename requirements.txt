@@ -16,5 +16,11 @@ flask>=2.0.0
 # Note: scservo_sdk is included locally in the scservo_sdk directory
 # This is a copy from the official Feetech SDK (via https://github.com/Adam-Software/Feetech-Servo-SDK)
 
+# CAN bus communication for motor control
+canopen>=2.3.0
+
+# Graphics/input handling for tank drive control
+pygame>=2.6.1
+
 # Optional dependencies (automatically handled by scripts if not installed):
 # - webbrowser (built-in Python module) 

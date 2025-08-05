@@ -13,11 +13,5 @@ sudo ip link set can0 up type can bitrate 1000000
 echo "CAN interface reset complete."
 echo "Starting tank drive control..."
 
-# Set dummy video driver for headless operation
-export SDL_VIDEODRIVER=dummy
-
-# Change to chassis_control_example directory to access the required files
-cd chassis_control_example
-
-# Run tank drive with any passed arguments
-python tank_drive_canopen.py "$@"
+# Use system libraries to avoid conda conflicts
+LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6 python tank_drive_canopen.py "$@"

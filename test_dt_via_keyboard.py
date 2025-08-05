@@ -142,7 +142,7 @@ class TankDrive:
             sys.exit(1)
         
         # Add motor nodes - need to access .eds file from chassis_control_example directory
-        eds_path = os.path.join(os.path.dirname(__file__), 'chassis_control_example', 'rs03.eds')
+        eds_path = os.path.join(os.path.dirname(__file__), 'chassis_control', 'rs03.eds')
         self.left_motor = self.network.add_node(LEFT_MOTOR_ID, eds_path)
         self.right_motor = self.network.add_node(RIGHT_MOTOR_ID, eds_path)
         self.z_motor = self.network.add_node(Z_MOTOR_ID, eds_path)
@@ -432,7 +432,7 @@ def main():
         print("1. RS03 motors are connected and powered on")
         print("2. CAN interface is properly configured")
         print("3. You have necessary permissions for CAN access")
-        print("4. The rs03.eds file exists in chassis_control_example/")
+        print("4. The rs03.eds file exists in chassis_control/")
 
 
 if __name__ == "__main__":

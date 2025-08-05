@@ -69,9 +69,9 @@ class TankDrive:
             sys.exit(1)
         
         # Add motor nodes
-        self.left_motor = self.network.add_node(LEFT_MOTOR_ID, 'rs03.eds')
-        self.right_motor = self.network.add_node(RIGHT_MOTOR_ID, 'rs03.eds')
-        self.z_motor = self.network.add_node(Z_MOTOR_ID, 'rs03.eds')
+        self.left_motor = self.network.add_node(LEFT_MOTOR_ID, 'chassis_control/rs03.eds')
+        self.right_motor = self.network.add_node(RIGHT_MOTOR_ID, 'chassis_control/rs03.eds')
+        self.z_motor = self.network.add_node(Z_MOTOR_ID, 'chassis_control/rs03.eds')
         
         # Initialize motors
         self.init_motors()
