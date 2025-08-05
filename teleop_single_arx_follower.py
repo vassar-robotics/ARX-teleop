@@ -136,16 +136,17 @@ class ARXArmWrapper:
         self.servo_to_radian_scale = (2 * np.pi) / 4095.0  # Full rotation scale
         
         # Load calibration data or use defaults
-        self.servo_centers = self._load_calibration()
+        self.servo_centers, self.invert_motors = self._load_calibration()
         
-    def _load_calibration(self) -> Dict[int, int]:
-        """Load servo center positions from calibration file."""
+    def _load_calibration(self) -> tuple[Dict[int, int], List[int]]:
+        """Load servo center positions and motor inversion list from calibration file."""
         default_centers = {i: 2048 for i in range(1, 8)}  # Default center for 7 joints
+        default_invert = []  # No motors inverted by default
         
         if not os.path.exists(self.calibration_file):
             logger.warning(f"Calibration file not found: {self.calibration_file}")
             logger.warning("Using default servo centers (2048). Consider running calibration.")
-            return default_centers
+            return default_centers, default_invert
             
         try:
             with open(self.calibration_file, 'r') as f:
@@ -153,6 +154,7 @@ class ARXArmWrapper:
                 
             home_positions = calibration_data.get("home_positions", {})
             motor_ids = calibration_data.get("motor_ids", list(range(1, 8)))
+            invert_motors = calibration_data.get("invert_motors", [])
             
             # Convert string keys to int and validate
             servo_centers = {}
@@ -167,13 +169,15 @@ class ARXArmWrapper:
             logger.info(f"✓ Loaded calibration from {self.calibration_file}")
             logger.info(f"  Created: {calibration_data.get('timestamp_str', 'Unknown')}")
             logger.info(f"  Servo centers: {servo_centers}")
+            if invert_motors:
+                logger.info(f"  Inverted motors: {invert_motors}")
             
-            return servo_centers
+            return servo_centers, invert_motors
             
         except Exception as e:
             logger.error(f"Failed to load calibration: {e}")
             logger.warning("Using default servo centers")
-            return default_centers
+            return default_centers, default_invert
         
     def connect(self):
         """Connect to the ARX arm."""
@@ -222,8 +226,15 @@ class ARXArmWrapper:
             for i, pos_rad in enumerate(joint_positions[:6]):  # 6 arm joints
                 motor_id = i + 1  # Motor IDs are 1-indexed
                 servo_center = self.servo_centers.get(motor_id, 2048)
-                # Convert radians to tic position using calibrated center
-                tic_pos = int(pos_rad / self.servo_to_radian_scale + servo_center)
+                
+                # Check if this motor should be inverted (reverse the inversion for reading)
+                if motor_id in self.invert_motors:
+                    # Inverted: reverse the inversion when reading back
+                    tic_pos = int(servo_center - pos_rad / self.servo_to_radian_scale)
+                else:
+                    # Normal: standard conversion
+                    tic_pos = int(pos_rad / self.servo_to_radian_scale + servo_center)
+                    
                 tics[motor_id] = tic_pos
                 
             # Note: ARX SDK doesn't provide a way to read gripper position
@@ -255,8 +266,16 @@ class ARXArmWrapper:
                 if 1 <= motor_id <= 6:  # Arm joints
                     # Get calibrated center for this motor
                     servo_center = self.servo_centers.get(motor_id, 2048)
-                    # Convert tic to radians using calibrated center
-                    rad_pos = (tic_pos - servo_center) * self.servo_to_radian_scale
+                    
+                    # Check if this motor should be inverted
+                    if motor_id in self.invert_motors:
+                        # Inverted: flip motion around center point
+                        rad_pos = (servo_center - tic_pos) * self.servo_to_radian_scale
+                        logger.debug(f"Motor {motor_id} inverted: {tic_pos} -> {rad_pos:.3f}")
+                    else:
+                        # Normal: standard conversion
+                        rad_pos = (tic_pos - servo_center) * self.servo_to_radian_scale
+                        
                     arm_positions[motor_id - 1] = rad_pos  # Convert to 0-indexed
                     
                 elif motor_id == 7:  # Gripper

@@ -23,5 +23,6 @@
   "port": "/dev/cu.usbmodem5A460813891",
   "voltage": 5.1,
   "is_leader": true,
-  "notes": "Leader arm home positions corresponding to ARX R5 home pose"
+  "invert_motors": [3, 4],
+  "notes": "Leader arm home positions corresponding to ARX R5 home pose. Motors 3 & 4 inverted for proper follower mapping."
 }
