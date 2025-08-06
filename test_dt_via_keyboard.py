@@ -1,38 +1,13 @@
 #!/usr/bin/env python3
 """
-DT Tank Drive Keyboard Control Script
-
-This script combines motor finding and tank drive control functionality.
-It first scans for available motors on the CAN bus, then provides
-keyboard-based control for the RS03 tank drive system with Z-axis control.
-
-Controls an RS03 tank drive system using keyboard input with:
-- WASD for tank drive movement
-- Q/E for Z-axis up/down movement
-
-Requirements:
-- RS03 motors connected via CAN adapter
-- CAN interface configured (e.g., can0)
-- PyGame for keyboard input
-- CANopen library
-
-Usage:
-    python test_dt_via_keyboard.py [can_interface]
-    
-Example:
-    python test_dt_via_keyboard.py can0
+Tank drive control using PyGame WASD input and CANopen protocol
+for RS03 actuators (ID 126: left motor, ID 127: right motor)
 """
 
-import socket
-import canopen
-import os
-import time
 import pygame
+import canopen
+import time
 import sys
-
-# CAN bus configuration (may be overridden via environment variables)
-CAN_CHANNEL: str = os.getenv("CAN_CHANNEL", "can0")
-CAN_BITRATE: int = int(os.getenv("CAN_BITRATE", "1000000"))  # 1 Mbps
 
 # Motor configuration
 LEFT_MOTOR_ID = 126
@@ -70,56 +45,8 @@ Z_PROFILE_VELOCITY_RPM = 50  # Speed for Z-axis movements
 Z_PROFILE_ACCELERATION_RPM_S = 200  # Acceleration for Z-axis
 Z_POSITION_INCREMENT = 8192  # Position increment per key press (0.5 revolution)
 
-
-def scan_for_motors(can_channel=None, can_bitrate=None):
-    """
-    Scans the CAN bus for available nodes and prints their IDs.
-    Returns True if scan was successful, False otherwise.
-    """
-    if can_channel is None:
-        can_channel = CAN_CHANNEL
-    if can_bitrate is None:
-        can_bitrate = CAN_BITRATE
-        
-    network = canopen.Network()
-    print(f"Connecting to CAN bus ({can_channel}, {can_bitrate} bit/s)…")
-    
-    try:
-        network.connect(
-            bustype="socketcan",
-            channel=can_channel,
-            bitrate=can_bitrate,
-        )
-
-        print("Scanning for nodes…")
-        network.scanner.search(limit=127)
-
-        # Give nodes some time to respond to the search request
-        time.sleep(2)
-
-        if not network.scanner.nodes:
-            print("No nodes found on the network.")
-            return False
-        else:
-            print("Found the following node IDs:")
-            for node_id in sorted(network.scanner.nodes):
-                print(f"- {node_id}")
-            return True
-
-    except Exception as e:
-        print(f"An error occurred during motor scan: {e}")
-        print(
-            "Please ensure the CAN interface is configured correctly "
-            f"(e.g., `sudo ip link set {can_channel} up type can bitrate {can_bitrate}`)"
-        )
-        return False
-    finally:
-        network.disconnect()
-        print("Motor scan complete.")
-
-
 class TankDrive:
-    def __init__(self, can_interface='can0', bitrate=1000000):
+    def __init__(self, can_interface='can1', bitrate=1000000):
         """Initialize tank drive controller"""
         # Initialize pygame
         pygame.init()
@@ -141,11 +68,10 @@ class TankDrive:
             print(f"  sudo ip link set {can_interface} up")
             sys.exit(1)
         
-        # Add motor nodes - need to access .eds file from chassis_control_example directory
-        eds_path = os.path.join(os.path.dirname(__file__), 'chassis_control', 'rs03.eds')
-        self.left_motor = self.network.add_node(LEFT_MOTOR_ID, eds_path)
-        self.right_motor = self.network.add_node(RIGHT_MOTOR_ID, eds_path)
-        self.z_motor = self.network.add_node(Z_MOTOR_ID, eds_path)
+        # Add motor nodes
+        self.left_motor = self.network.add_node(LEFT_MOTOR_ID, 'chassis_control/rs03.eds')
+        self.right_motor = self.network.add_node(RIGHT_MOTOR_ID, 'chassis_control/rs03.eds')
+        self.z_motor = self.network.add_node(Z_MOTOR_ID, 'chassis_control/rs03.eds')
         
         # Initialize motors
         self.init_motors()
@@ -247,7 +173,7 @@ class TankDrive:
             right_value = int(right_rpm * 10)
             
             # Set target velocities
-            self.left_motor.sdo[TARGET_VELOCITY].raw = left_value
+            self.left_motor.sdo[TARGET_VELOCITY].raw = -left_value
             self.right_motor.sdo[TARGET_VELOCITY].raw = right_value
             
         except Exception as e:
@@ -276,9 +202,9 @@ class TankDrive:
         forward = 0
         turn = 0
         
-        if keys[pygame.K_w]:
+        if keys[pygame.K_s]:
             forward = MAX_SPEED_RPM
-        elif keys[pygame.K_s]:
+        elif keys[pygame.K_w]:
             forward = -MAX_SPEED_RPM
             
         if keys[pygame.K_a]:
@@ -313,7 +239,7 @@ class TankDrive:
         title = font.render("RS03 Tank Drive + Z", True, (255, 255, 255))
         self.screen.blit(title, (80, 20))
         
-        # Instructions
+        # Instructionsleft
         font_small = pygame.font.Font(None, 24)
         instructions = [
             "W - Forward",
@@ -385,55 +311,13 @@ class TankDrive:
             # Quit pygame
             pygame.quit()
             print("Tank drive control stopped.")
-
-
-def main():
-    """Main function - scans for motors then starts keyboard control"""
-    
+            
+if __name__ == "__main__":
     # Check if CAN interface is specified
-    can_interface = 'can0'
+    can_interface = 'can1'
     if len(sys.argv) > 1:
         can_interface = sys.argv[1]
-    
-    print("=== DT Tank Drive Keyboard Control ===")
-    print(f"Using CAN interface: {can_interface}")
-    print()
-    
-    # First, scan for available motors
-    print("Step 1: Scanning for motors...")
-    scan_success = scan_for_motors(can_interface, CAN_BITRATE)
-    
-    if not scan_success:
-        print("Motor scan failed. Please check your CAN interface configuration.")
-        print("Exiting...")
-        return
-    
-    print()
-    print("Step 2: Starting tank drive control...")
-    print("Make sure motors with IDs 126 (left), 127 (right), and 1 (Z-axis) are connected.")
-    
-    # Ask user if they want to continue
-    try:
-        response = input("Continue with tank drive control? (y/N): ").strip().lower()
-        if response not in ['y', 'yes']:
-            print("Exiting...")
-            return
-    except KeyboardInterrupt:
-        print("\nExiting...")
-        return
-    
+        
     # Create and run tank drive controller
-    try:
-        controller = TankDrive(can_interface=can_interface, bitrate=CAN_BITRATE)
-        controller.run()
-    except Exception as e:
-        print(f"Error starting tank drive controller: {e}")
-        print("Make sure:")
-        print("1. RS03 motors are connected and powered on")
-        print("2. CAN interface is properly configured")
-        print("3. You have necessary permissions for CAN access")
-        print("4. The rs03.eds file exists in chassis_control/")
-
-
-if __name__ == "__main__":
-    main()
+    controller = TankDrive(can_interface=can_interface)
+    controller.run()

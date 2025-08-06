@@ -14,4 +14,4 @@ echo "CAN interface reset complete."
 echo "Starting tank drive control..."
 
 # Use system libraries to avoid conda conflicts
-LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6 python tank_drive_canopen.py "$@"
+LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6 python test_dt_via_keyboard.py "$@"
