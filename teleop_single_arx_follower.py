@@ -13,6 +13,8 @@ Usage:
 
 import os
 import logging
+import zmq 
+import json
 
 # Disable PubNub logging via environment variable
 os.environ['PUBNUB_LOG_LEVEL'] = 'NONE'
@@ -43,15 +45,15 @@ import threading
 from typing import Dict, List, Optional
 import numpy as np
 
-try:
-    from pubnub.pnconfiguration import PNConfiguration
-    from pubnub.pubnub import PubNub
-    from pubnub.exceptions import PubNubException
-    from pubnub.callbacks import SubscribeCallback
-    from pubnub.enums import PNStatusCategory
-except ImportError:
-    print("PubNub not installed. Please install with: pip install pubnub")
-    sys.exit(1)
+# try:
+#     from pubnub.pnconfiguration import PNConfiguration
+#     from pubnub.pubnub import PubNub
+#     from pubnub.exceptions import PubNubException
+#     from pubnub.callbacks import SubscribeCallback
+#     from pubnub.enums import PNStatusCategory
+# except ImportError:
+#     print("PubNub not installed. Please install with: pip install pubnub")
+#     sys.exit(1)
 
 try:
     from colorama import init, Fore, Style
@@ -64,7 +66,7 @@ except ImportError:
         RESET_ALL = BRIGHT = ""
 
 # Import our modules
-import pubnub_config
+# import pubnub_config
 from arx_control import ARXArm  # Use ARX arm instead of SO101Controller
 
 # Global flag for graceful shutdown
@@ -418,7 +420,7 @@ class SingleFollowerTeleop:
         self.running = False
         
         # Network components
-        self.pubnub: Optional[PubNub] = None
+        # self.pubnub: Optional[PubNub] = None
         self.telemetry_listener = TelemetryListener()
         
         # Position smoothing
@@ -428,6 +430,9 @@ class SingleFollowerTeleop:
         self.last_update_time = 0
         self.update_times = []
         self.latencies = []
+        self.s = zmq.Context().socket(zmq.PULL)
+        self.s.bind("tcp://0.0.0.0:5000")
+        print("Follower set up to ZMQ")
         
     def setup_pubnub(self):
         """Initialize PubNub connection."""
@@ -599,9 +604,9 @@ class SingleFollowerTeleop:
         try:
             while self.running and not shutdown_requested:
                 # Check for new telemetry data
-                if self.telemetry_listener.latest_data:
+                if s.recv_string():
                     # Process the latest data
-                    self.apply_positions(self.telemetry_listener.latest_data)
+                    self.apply_positions(json.loads(s.recv_string()))
                     
                     # Track update rate
                     now = time.time()
@@ -664,6 +669,10 @@ class SingleFollowerTeleop:
 def main():
     # Register signal handler for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
+
+    # SETUP ZMQ RECEIVING:
+    
+    
     
     parser = argparse.ArgumentParser(description="Single-arm ARX follower-side teleoperation via PubNub")
     parser.add_argument("--can_port", type=str, default="can0",
@@ -687,7 +696,7 @@ def main():
     
     try:
         # Setup
-        teleop.setup_pubnub()
+        # teleop.setup_pubnub()
         teleop.connect_follower()
         
         # Run main loop
