@@ -44,16 +44,7 @@ import time
 import threading
 from typing import Dict, List, Optional
 import numpy as np
-
-# try:
-#     from pubnub.pnconfiguration import PNConfiguration
-#     from pubnub.pubnub import PubNub
-#     from pubnub.exceptions import PubNubException
-#     from pubnub.callbacks import SubscribeCallback
-#     from pubnub.enums import PNStatusCategory
-# except ImportError:
-#     print("PubNub not installed. Please install with: pip install pubnub")
-#     sys.exit(1)
+import canopen
 
 try:
     from colorama import init, Fore, Style
@@ -68,6 +59,37 @@ except ImportError:
 # Import our modules
 # import pubnub_config
 from arx_control import ARXArm  # Use ARX arm instead of SO101Controller
+
+# Motor configuration
+LEFT_MOTOR_ID = 126
+RIGHT_MOTOR_ID = 127
+Z_MOTOR_ID = 1  # Z-axis motor ID
+
+# CANopen object dictionary indices
+CONTROLWORD = 0x6040
+STATUSWORD = 0x6041
+MODES_OF_OPERATION = 0x6060
+TARGET_TORQUE = 0x6071
+TARGET_VELOCITY = 0x60FF
+VELOCITY_ACTUAL = 0x606C
+TARGET_POSITION = 0x607A
+PROFILE_VELOCITY = 0x6081
+PROFILE_ACCELERATION = 0x6083
+POSITION_ACTUAL = 0x6064
+
+# Control modes
+VELOCITY_MODE = 3
+POSITION_MODE_PP = 1  # Profile Position mode
+
+# Motor states
+SWITCH_ON_DISABLED = 0x40
+READY_TO_SWITCH_ON = 0x21
+SWITCHED_ON = 0x23
+OPERATION_ENABLE = 0x27
+
+# Z-axis configuration
+Z_PROFILE_VELOCITY_RPM = 50  # Speed for Z-axis movements
+Z_PROFILE_ACCELERATION_RPM_S = 200  # Acceleration for Z-axis
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -365,49 +387,6 @@ class ARXArmWrapper:
         return gripper_cmd
 
 
-# class TelemetryListener(SubscribeCallback):
-#     """Listen for telemetry data from leaders."""
-    
-#     def __init__(self):
-#         self.latest_data = None
-#         self.last_sequence = 0
-#         self.received_count = 0
-#         self.dropped_count = 0
-#         self.last_receive_time = 0
-        
-#     def status(self, pubnub, status):
-#         """Handle connection status changes."""
-#         if status.category == PNStatusCategory.PNConnectedCategory:
-#             logger.info(f"{Fore.GREEN}✓ Connected to PubNub channels{Style.RESET_ALL}")
-#         elif status.category == PNStatusCategory.PNReconnectedCategory:
-#             logger.info(f"{Fore.YELLOW}Reconnected to PubNub{Style.RESET_ALL}")
-#         elif status.category == PNStatusCategory.PNDisconnectedCategory:
-#             logger.warning(f"{Fore.RED}Disconnected from PubNub{Style.RESET_ALL}")
-            
-#     def message(self, pubnub, message):
-#         """Handle incoming telemetry messages."""
-#         try:
-#             # Get the message data
-#             data = message.message
-                
-#             if isinstance(data, dict) and data.get("type") == "telemetry":
-#                 sequence = data.get("sequence", 0)
-                
-#                 # Only count as dropped if we actually missed messages (not just overwrites)
-#                 if self.last_sequence > 0 and sequence > self.last_sequence + 1:
-#                     missed = sequence - self.last_sequence - 1
-#                     # Only count as dropped if we have pending data that would be overwritten
-#                     if self.latest_data is not None:
-#                         self.dropped_count += missed
-                
-#                 self.latest_data = data
-#                 self.last_receive_time = time.time()
-#                 self.received_count += 1
-#                 self.last_sequence = sequence
-                
-#         except Exception as e:
-#             logger.error(f"Error processing message: {e}")
-
 
 class SingleFollowerTeleop:
     """Main teleoperation class for single ARX follower."""
@@ -418,14 +397,6 @@ class SingleFollowerTeleop:
         self.calibration_file = calibration_file
         self.follower: Optional[ARXArmWrapper] = None  # SIMPLIFIED: Single follower instead of list
         self.running = False
-        
-        # Network components
-        # self.pubnub: Optional[PubNub] = None
-        # self.telemetry_listener = TelemetryListener()
-        
-        # Position smoothing
-        # self.smoother = ARXPositionSmoother(pubnub_config.POSITION_SMOOTHING)
-        
         # Update tracking
         self.last_update_time = 0
         self.update_times = []
@@ -433,28 +404,21 @@ class SingleFollowerTeleop:
         self.s = zmq.Context().socket(zmq.PULL)
         self.s.bind("tcp://0.0.0.0:5000")
         print("Follower set up to ZMQ")
+
+        # Set up CANopen for drivetrain controls
+        self.channel = "can0"
+        self.bitrate = 1000000
+        self.network = canopen.Network()
+        self.network.connect(interface='socketcan', channel=self.channel, bitrate=self.bitrate)
         
-    # def setup_pubnub(self):
-    #     """Initialize PubNub connection."""
-    #     logger.info("Setting up PubNub connection...")
-    #     
-    #     pnconfig = PNConfiguration()
-    #     pnconfig.subscribe_key = pubnub_config.SUBSCRIBE_KEY
-    #     pnconfig.publish_key = pubnub_config.PUBLISH_KEY
-    #     pnconfig.user_id = f"follower-{platform.node()}"
-    #     pnconfig.ssl = True
-    #     pnconfig.enable_subscribe = True
-    #     # Disable PubNub's internal logging
-    #     pnconfig.log_verbosity = False
-    #     pnconfig.enable_logging = False
-    #     
-    #     self.pubnub = PubNub(pnconfig)
-    #     # self.pubnub.add_listener(self.telemetry_listener)
-    #     
-    #     # Subscribe to telemetry channel
-    #     self.pubnub.subscribe().channels([pubnub_config.TELEMETRY_CHANNEL]).execute()
-    #     
-    #     logger.info(f"{Fore.GREEN}✓ PubNub connected as {pnconfig.user_id}{Style.RESET_ALL}")
+        # Add motor nodes BEFORE initializing them
+        self.left_motor = self.network.add_node(LEFT_MOTOR_ID, 'chassis_control/rs03.eds')
+        self.right_motor = self.network.add_node(RIGHT_MOTOR_ID, 'chassis_control/rs03.eds')
+        self.z_motor = self.network.add_node(Z_MOTOR_ID, 'chassis_control/rs03.eds')
+        
+        # Initialize motors after nodes are added
+        self.init_dt_motors()
+        
         
     def connect_follower(self):
         """Connect to the ARX follower robot."""
@@ -463,39 +427,13 @@ class SingleFollowerTeleop:
         self.follower.connect()
         
         logger.info(f"{Fore.GREEN}✓ Connected to ARX follower robot{Style.RESET_ALL}")
-        
-    # def send_acknowledgment(self, sequence: int, timestamp: float):
-    #     """Send acknowledgment back to leader."""
-    #     try:
-    #         ack_msg = {
-    #             "type": "ack",
-    #             "sequence": sequence,
-    #             "timestamp": timestamp,
-    #             "follower_id": f"follower-{platform.node()}"
-    #         }
-    #         self.pubnub.publish().channel(pubnub_config.STATUS_CHANNEL).message(ack_msg).pn_async(lambda result, status: None)
-    #     except:
-    #         pass  # Don't fail on ack errors
-            
-    # def send_status(self):
-    #     """Send periodic status updates."""
-    #     try:
-    #         status_msg = {
-    #             "type": "status",
-    #             "timestamp": time.time(),
-    #             "follower_id": f"follower-{platform.node()}",
-    #             "motors_active": 7,  # 6 arm joints + 1 gripper for ARX R5
-    #             "followers_connected": 1  # Single follower
-    #         }
-    #         self.pubnub.publish().channel(pubnub_config.STATUS_CHANNEL).message(status_msg).sync()
-    #     except:
-    #         pass
-            
+     
     def apply_positions(self, telemetry_data: Dict):
         """Apply received positions to ARX follower robot."""
         timestamp = telemetry_data.get("timestamp", 0)
         sequence = telemetry_data.get("sequence", 0)
         positions_data = telemetry_data.get("positions", {})
+        dt_controls = telemetry_data.get("dt_controls", {})
         
         # Debug logging
         logger.debug(f"Received positions: {positions_data}")
@@ -505,16 +443,7 @@ class SingleFollowerTeleop:
         self.latencies.append(latency)
         if len(self.latencies) > 100:
             self.latencies.pop(0)
-            
-        # Safety check: reject if latency too high
-        # if latency > pubnub_config.MAX_LATENCY_MS:
-        #     logger.warning(f"{Fore.RED}Rejecting data: latency {latency:.1f}ms > {pubnub_config.MAX_LATENCY_MS}ms{Style.RESET_ALL}")
-        #     return
-            
-        # Send acknowledgment (only every 5th message to reduce traffic)
-        # if sequence % 5 == 0:
-        #     self.send_acknowledgment(sequence, timestamp)
-        
+      
         # SIMPLIFIED: Direct position application for single arm
         if not self.follower or not self.follower.connected:
             logger.warning("No connected follower to apply positions to")
@@ -529,12 +458,80 @@ class SingleFollowerTeleop:
                 
             logger.debug(f"Writing positions to ARX arm: {motor_positions}")
             
+            # Get drivetrain control values (in RPM)
+            left_motor_speed = dt_controls.get("left_speed", 0)
+            right_motor_speed = dt_controls.get("right_speed", 0)
+            z_motor_speed = dt_controls.get("z_speed", 0)
+
+            # Convert RPM to 0.1 RPM units (as per RS03 manual)
+            # and apply to motors
+            self.left_motor.sdo[TARGET_VELOCITY].raw = int(-left_motor_speed * 10)
+            self.right_motor.sdo[TARGET_VELOCITY].raw = int(right_motor_speed * 10)
+            self.z_motor.sdo[TARGET_VELOCITY].raw = int(z_motor_speed * 10)
+
             # Apply positions to ARX arm with smoothing
             self.follower.write_joint_tics(motor_positions)
             
         except Exception as e:
             logger.error(f"Error applying positions: {e}")
             
+        
+    def init_dt_motors(self):
+        """Initialize drivetrain motors - all motors in velocity mode for follower."""
+        # Initialize all motors in velocity mode (including Z)
+        # The follower receives velocity commands, not position commands
+        dt_motors = [
+            (self.left_motor, "Left"),
+            (self.right_motor, "Right"),
+            (self.z_motor, "Z")
+        ]
+        
+        for motor, name in dt_motors:
+            try:
+                logger.info(f"Initializing {name} motor (ID: {motor.id})...")
+                
+                # First disable motor (set to SWITCH_ON_DISABLED state)
+                motor.sdo[CONTROLWORD].raw = 0
+                time.sleep(0.1)
+                
+                # Set velocity mode for all motors
+                motor.sdo[MODES_OF_OPERATION].raw = VELOCITY_MODE
+                
+                # Set max torque (1000 = 100% = 20 N·m for RS03)
+                motor.sdo[TARGET_TORQUE].raw = 1000
+                
+                # Enable motor operation
+                motor.sdo[CONTROLWORD].raw = 15
+                
+                # Check status
+                status = motor.sdo[STATUSWORD].raw
+                if status & 0x6F == OPERATION_ENABLE:
+                    logger.info(f"{name} motor enabled successfully")
+                else:
+                    logger.info(f"{name} motor status: 0x{status:04X}")
+                    
+            except Exception as e:
+                logger.error(f"Error initializing {name} motor: {e}")
+                
+    def stop_dt_motors(self):
+        """Stop all drivetrain motors."""
+        try:
+            # Set velocity to 0 for all motors
+            self.left_motor.sdo[TARGET_VELOCITY].raw = 0
+            self.right_motor.sdo[TARGET_VELOCITY].raw = 0
+            self.z_motor.sdo[TARGET_VELOCITY].raw = 0
+            
+            # Disable all motors
+            self.left_motor.sdo[CONTROLWORD].raw = 0
+            self.right_motor.sdo[CONTROLWORD].raw = 0
+            self.z_motor.sdo[CONTROLWORD].raw = 0
+            
+            logger.info("Drivetrain motors stopped")
+            
+        except Exception as e:
+            logger.error(f"Error stopping drivetrain motors: {e}")
+
+
     def display_status(self):
         """Display current status and statistics."""
         # Clear screen and move cursor to top
@@ -549,40 +546,12 @@ class SingleFollowerTeleop:
             print(f"  Motors: 6 arm joints + 1 gripper")  # ARX R5 architecture
         print()
         
-        # # Network stats
-        # stats = {
-        #     'received': self.telemetry_listener.received_count,
-        #     'dropped': self.telemetry_listener.dropped_count,
-        #     'latency': self.latencies
-        # }
-        # print(f"{Style.BRIGHT}Network Statistics:{Style.RESET_ALL}")
-        # if stats['latency']:
-        #     avg_latency = sum(stats['latency']) / len(stats['latency'])
-        #     max_latency = max(stats['latency'])
-        #     print(f"  Average Latency: {avg_latency:.1f}ms")
-        #     print(f"  Max Latency:     {max_latency:.1f}ms")
-        # else:
-        #     print(f"  Latency: No data yet")
-            
-        # print(f"  Received:        {stats['received']}")
-        # print(f"  Dropped:         {stats['dropped']}")
-        
         # Update rate
         if self.update_times:
             avg_interval = sum(self.update_times) / len(self.update_times)
             actual_fps = 1.0 / avg_interval if avg_interval > 0 else 0
             print(f"  Update Rate:     {actual_fps:.1f} Hz")
-            
-        # # Connection status
-        # if self.telemetry_listener.last_receive_time > 0:
-        #     age = time.time() - self.telemetry_listener.last_receive_time
-        #     if age < 1:
-        #         status = f"{Fore.GREEN}Connected{Style.RESET_ALL}"
-        #     elif age < 5:
-        #         status = f"{Fore.YELLOW}Slow{Style.RESET_ALL}"
-        #     else:
-        #         status = f"{Fore.RED}Disconnected{Style.RESET_ALL}"
-        #     print(f"  Status:          {status} (last data {age:.1f}s ago)")
+           {status} (last data {age:.1f}s ago)")
             
         print()
         print(f"{Fore.CYAN}Press Ctrl+C to stop{Style.RESET_ALL}")
@@ -652,6 +621,17 @@ class SingleFollowerTeleop:
         # Unsubscribe from channels
         # if self.pubnub:
         #     self.pubnub.unsubscribe_all()
+        
+        # Stop drivetrain motors first
+        logger.info("Stopping drivetrain motors...")
+        self.stop_dt_motors()
+        
+        # Disconnect from CAN network
+        try:
+            self.network.disconnect()
+            logger.info("Disconnected from CAN network")
+        except Exception as e:
+            logger.warning(f"Failed to disconnect from CAN network: {e}")
             
         # Return to home position and disconnect robot
         logger.info("Returning ARX arm to home position...")

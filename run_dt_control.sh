@@ -10,6 +10,8 @@ sudo ip link set can0 down
 # Bring CAN interface back up with proper configuration
 sudo ip link set can0 up type can bitrate 1000000
 
+sudo ip link set can0 txqueuelen 300
+
 echo "CAN interface reset complete."
 echo "Starting tank drive control..."
 

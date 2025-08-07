@@ -12,28 +12,10 @@ Usage:
 """
 
 import os
-# import logging
+import pygame
+import time
 import zmq
 import json
-
-# Disable PubNub logging via environment variable
-os.environ['PUBNUB_LOG_LEVEL'] = 'NONE'
-
-# Configure logging BEFORE importing other modules
-# logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-# logger = logging.getLogger(__name__)
-
-# Suppress verbose HTTP logs from various libraries
-# logging.getLogger('urllib3').setLevel(logging.ERROR)
-# logging.getLogger('requests').setLevel(logging.ERROR)
-# logging.getLogger('httpx').setLevel(logging.ERROR)
-# logging.getLogger('httpcore').setLevel(logging.ERROR)
-# logging.getLogger('pubnub').setLevel(logging.WARNING)
-# Disable all INFO logs from modules starting with 'http'
-# for name in logging.root.manager.loggerDict:
-#     if name.startswith('http'):
-#         logging.getLogger(name).setLevel(logging.ERROR)
-
 import argparse
 import json
 import platform
@@ -42,6 +24,7 @@ import sys
 import time
 import threading
 from typing import Dict, List, Optional
+from servo_controller import SO101Controller
 
 # Import select for Unix systems
 try:
@@ -49,16 +32,6 @@ try:
 except ImportError:
     # Windows doesn't have select for stdin
     select = None
-
-# try:
-#     from pubnub.pnconfiguration import PNConfiguration
-#     from pubnub.pubnub import PubNub
-#     from pubnub.exceptions import PubNubException
-#     from pubnub.callbacks import SubscribeCallback
-#     from pubnub.enums import PNStatusCategory
-# except ImportError:
-#     print("PubNub not installed. Please install with: pip install pubnub")
-#     sys.exit(1)
 
 try:
     from colorama import init, Fore, Style
@@ -70,13 +43,9 @@ except ImportError:
     class Style:
         RESET_ALL = BRIGHT = ""
 
-# Import our modules
-# import pubnub_config
-from servo_controller import SO101Controller
 
 # Global flag for graceful shutdown
 shutdown_requested = False
-
 
 def signal_handler(signum, frame):
     """Handle SIGINT (Ctrl+C) for graceful shutdown."""
@@ -137,34 +106,7 @@ class NetworkMonitor:
         }
 
 
-# class StatusListener(SubscribeCallback):
-#     """Listen for status updates from follower."""
-#     
-#     def __init__(self, monitor: NetworkMonitor):
-#         self.monitor = monitor
-#         self.follower_status = {}
-#         
-#     def message(self, pubnub, message):
-#         """Handle status messages from follower."""
-#         data = message.message
-#         if isinstance(data, dict) and data.get("type") == "ack":
-#             # Acknowledgment from follower
-#             sequence = data.get("sequence")
-#             timestamp = data.get("timestamp")
-#             if sequence is not None and timestamp is not None:
-#                 latency = self.monitor.message_acknowledged(sequence, timestamp)
-#                 if latency is not None:
-#                     # print(f"Received ack for seq {sequence}, latency: {latency:.1f}ms")
-#                     pass
-#                 # if latency and latency > pubnub_config.LATENCY_WARNING_MS:
-#                 #     print(f"{Fore.YELLOW}High latency: {latency:.1f}ms{Style.RESET_ALL}")
-#                 
-#         elif isinstance(data, dict) and data.get("type") == "status":
-#             # Status update from follower
-#             self.follower_status[data.get("follower_id")] = data
-
-
-class SingleLeaderTeleop:
+class SingleLeaderTeleop: # TODO rename class to MarvinRobot
     """Main teleoperation class for single leader arm."""
     
     # HARDCODED PORT - Change this to switch ports easily
@@ -186,6 +128,20 @@ class SingleLeaderTeleop:
         # Performance tracking
         self.last_publish_time = 0
         self.publish_times = []
+        self.LIFT_SPEED_RPM = 50
+        self.DRIVE_SPEED_RPM = 100
+        self.TURN_SPEED_FACTOR = 0.7
+        self.left_speed = 0
+        self.right_speed = 0
+        self.z_speed = 0
+        self.dt_controls = {
+            "left_speed": self.left_speed,
+            "right_speed": self.right_speed,
+            "z_speed": self.z_speed
+        }
+
+        self.setup_pygame()
+
         
     def setup_pubnub(self):
         """Initialize PubNub connection."""
@@ -221,6 +177,87 @@ class SingleLeaderTeleop:
             
         print(f"{Fore.GREEN}✓ Connected to leader robot at {leader_port}{Style.RESET_ALL}")
         
+    def setup_pygame(self):
+        """Initialize pygame."""
+        pygame.init()
+        self.screen = pygame.display.set_mode((400, 320))
+        pygame.display.set_caption("RS03 Tank Drive + Z-Axis Control")
+        self.clock = pygame.time.Clock()
+
+
+    def draw_status(self):
+        """Draw status information on screen"""
+        self.screen.fill((0, 0, 0))
+        
+        font = pygame.font.Font(None, 36)
+        
+        # Title
+        title = font.render("RS03 Tank Drive + Z", True, (255, 255, 255))
+        self.screen.blit(title, (80, 20))
+        
+        # Instructionsleft
+        font_small = pygame.font.Font(None, 24)
+        instructions = [
+            "W - Forward",
+            "S - Backward", 
+            "A - Turn Left",
+            "D - Turn Right",
+            "Q - Z-axis Up",
+            "E - Z-axis Down",
+            "ESC - Exit"
+        ]
+        
+        y = 80
+        for instruction in instructions:
+            text = font_small.render(instruction, True, (200, 200, 200))
+            self.screen.blit(text, (20, y))
+            y += 25
+            
+        # Motor speeds
+        left_text = font_small.render(f"Left Motor: {self.left_speed:.1f} RPM", True, (0, 255, 0))
+        right_text = font_small.render(f"Right Motor: {self.right_speed:.1f} RPM", True, (0, 255, 0))
+        self.screen.blit(left_text, (20, 250))
+        self.screen.blit(right_text, (200, 250))
+        
+        # Z-axis position
+        z_text = font_small.render(f"Z Position: {self.z_speed} ({self.z_speed/16384:.2f} rev)", True, (0, 255, 255))
+        self.screen.blit(z_text, (20, 275))
+        
+        pygame.display.flip()
+
+    def handle_dt_input(self, events):
+        """Handle keyboard input for drivetrain."""
+        keys = pygame.key.get_pressed()
+
+        # Calculate base speeds for tank drive
+        forward = 0
+        turn = 0
+
+        if keys[pygame.K_s]:
+            forward = self.DRIVE_SPEED_RPM
+        elif keys[pygame.K_w]:
+            forward = -self.DRIVE_SPEED_RPM
+
+        if keys[pygame.K_a]:
+            turn = -self.DRIVE_SPEED_RPM * self.TURN_SPEED_FACTOR
+        elif keys[pygame.K_d]:
+            turn = self.DRIVE_SPEED_RPM * self.TURN_SPEED_FACTOR
+
+        if keys[pygame.K_q]:
+            self.z_speed =  self.LIFT_SPEED_RPM
+        elif keys[pygame.K_e]:
+            self.z_speed = -self.LIFT_SPEED_RPM
+
+        self.left_speed = forward + turn
+        self.right_speed = forward - turn
+
+        self.dt_controls = {
+            "left_speed": self.left_speed,
+            "right_speed": self.right_speed,
+            "z_speed": self.z_speed
+        }
+
+
     def publish_positions(self, positions: Dict[int, int]):
         """Publish position data via ZMQ."""
         self.sequence += 1
@@ -233,7 +270,8 @@ class SingleLeaderTeleop:
             "type": "telemetry",
             "timestamp": time.time(),
             "sequence": self.sequence,
-            "positions": position_data  # Single arm positions
+            "positions": position_data,  # Single arm positions
+            "dt_controls": self.dt_controls
         }
         
         try:
@@ -297,6 +335,21 @@ class SingleLeaderTeleop:
         try:
             while self.running and not shutdown_requested:
                 loop_start = time.time()
+
+                # TODO check if draw status works here
+                # Get all events
+                events = pygame.event.get()
+                
+                # Handle system events
+                for event in events:
+                    if event.type == pygame.QUIT:
+                        self.running = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            self.running = False
+
+                self.handle_dt_input(events)
+                self.draw_status()
                 
                 # Read positions from the leader
                 if self.leader and self.leader.connected:
@@ -308,12 +361,15 @@ class SingleLeaderTeleop:
                 elapsed = time.time() - loop_start
                 if elapsed < target_interval:
                     time.sleep(target_interval - elapsed)
+
                     
         except KeyboardInterrupt:
             print()  # New line after status display
             print("Stopping teleoperation...")
         finally:
             self.running = False
+
+
             
     def display_loop(self):
         """Separate thread for updating display."""
@@ -382,7 +438,7 @@ def main():
         print("Successfully connected to zmq")
         
         # Setup
-        # teleop.setup_pubnub()
+
         teleop.connect_leader()
         
         # Run main loop
