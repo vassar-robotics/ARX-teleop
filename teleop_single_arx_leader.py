@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Single-arm leader-side teleoperation script using PubNub for internet communication.
+Single-arm leader-side teleoperation script using ZMQ for communication.
 
 This script:
 1. Connects to 1 leader robot (<9V) via USB  # REMOVED: dual functionality for 2 leaders
 2. Reads its positions at high frequency
-3. Publishes position data to PubNub for a single follower robot
+3. Publishes position data via ZMQ for a single follower robot
 
 Usage:
     python teleop_single_arx_leader.py
@@ -120,10 +120,8 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         self.sequence = 0
         
         # Network components
-        # self.pubnub: Optional[PubNub] = None
         self.zmq_socket = None
         self.monitor = NetworkMonitor()
-        # self.status_listener = StatusListener(self.monitor)
         
         # Performance tracking
         self.last_publish_time = 0
@@ -143,28 +141,7 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         self.setup_pygame()
 
         
-    def setup_pubnub(self):
-        """Initialize PubNub connection."""
-        print("Setting up PubNub connection...")
-        
-        pnconfig = PNConfiguration()
-        pnconfig.subscribe_key = pubnub_config.SUBSCRIBE_KEY
-        pnconfig.publish_key = pubnub_config.PUBLISH_KEY
-        pnconfig.user_id = f"leader-{platform.node()}"
-        pnconfig.ssl = True
-        pnconfig.enable_subscribe = True
-        # Disable PubNub's internal logging
-        pnconfig.log_verbosity = False
-        pnconfig.enable_logging = False
-        
-        self.pubnub = PubNub(pnconfig)
-        self.pubnub.add_listener(self.status_listener)
-        
-        # Subscribe to status channel for follower feedback
-        self.pubnub.subscribe().channels([pubnub_config.STATUS_CHANNEL]).execute()
-        
-        print(f"{Fore.GREEN}✓ PubNub connected as {pnconfig.user_id}{Style.RESET_ALL}")
-        
+
     def connect_leader(self):
         """Connect to the single leader robot."""
         # Use hardcoded port instead of auto-detection
@@ -276,9 +253,9 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         }
         
         try:
-            # SETUP STREAMING WITHOUT PUBNUB:
+            # Send via ZMQ
             self.zmq_socket.send_string(json.dumps(message))
-            # self.monitor.message_sent(self.sequence)
+            self.monitor.message_sent(self.sequence)
             
             # Track publish rate
             now = time.time()
@@ -312,10 +289,8 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         else:
             rate_info = "Rate: --"
         
-        # Follower count
-        # active_followers = sum(1 for fid, status in self.status_listener.follower_status.items() 
-        #                       if time.time() - status.get("timestamp", 0) < 5)
-        follower_info = f"Followers: 0"
+        # Follower count - simplified for now
+        follower_info = f"Followers: 1"
         
         # Single compact line
         status_line = f"LEADER {leader_status} | {net_info} | {rate_info} | {follower_info} | Sent: {stats['sent']}"
@@ -324,13 +299,14 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
     def teleoperation_loop(self):
         """Main loop reading positions and publishing."""
         self.running = True
-        target_interval = 1.0 / 20  # Default 20 FPS
+        target_fps = 20  # Default 20 FPS
+        target_interval = 1.0 / target_fps
         
         # Start display thread
         display_thread = threading.Thread(target=self.display_loop, daemon=True)
         display_thread.start()
         
-        # print(f"Starting single arm teleoperation at {pubnub_config.TARGET_FPS} Hz...")
+        print(f"Starting single arm teleoperation at {target_fps} Hz...")
         print("Status updates every 2 seconds on single line. Press Ctrl+C to stop.")
         
         try:
@@ -384,20 +360,6 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         self.running = False
         print()  # New line after status display
         
-        # Publish disconnect message
-        if self.pubnub:
-            try:
-                disconnect_msg = {
-                    "type": "disconnect",
-                    "timestamp": time.time(),
-                    "leader_id": f"leader-{platform.node()}"
-                }
-                self.pubnub.publish().channel(pubnub_config.STATUS_CHANNEL).message(disconnect_msg).sync()
-            except:
-                pass
-                
-            self.pubnub.unsubscribe_all()
-            
         # Disconnect robot
         print("Disconnecting robot...")
         if self.leader:
@@ -413,7 +375,7 @@ def main():
     # Register signal handler for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     
-    parser = argparse.ArgumentParser(description="Single-arm leader-side teleoperation via PubNub")
+    parser = argparse.ArgumentParser(description="Single-arm leader-side teleoperation via ZMQ")
     parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7",  # All 7 motors: 1-6 for arm joints, 7 for gripper
                        help="Comma-separated motor IDs")
     parser.add_argument("--baudrate", type=int, default=1000000,
@@ -433,14 +395,13 @@ def main():
     teleop = SingleLeaderTeleop(motor_ids, args.baudrate)
     
     try:
-        # SETTING UP NON_PUBNUB STREAMING:
+        # Set up ZMQ streaming
         context = zmq.Context()
         teleop.zmq_socket = context.socket(zmq.PUSH)
-        teleop.zmq_socket.connect("tcp://192.168.165.59:5000")
-        print("Successfully connected to zmq")
+        teleop.zmq_socket.connect("tcp://192.168.165.119:5000")
+        print("Successfully connected to ZMQ")
         
-        # Setup
-
+        # Connect to leader robot
         teleop.connect_leader()
         
         # Run main loop

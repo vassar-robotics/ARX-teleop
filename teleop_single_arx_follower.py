@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Single-arm follower-side teleoperation script using PubNub for internet communication.
+Single-arm follower-side teleoperation script using ZMQ for communication.
 
 This script:
 1. Connects to 1 ARX R5 follower robot via CAN interface  # REMOVED: dual functionality for 2 followers
-2. Subscribes to position data from PubNub
+2. Subscribes to position data from ZMQ
 3. Applies received positions to the ARX follower robot with safety checks
 
 Usage:
@@ -16,9 +16,6 @@ import logging
 import zmq 
 import json
 
-# Disable PubNub logging via environment variable
-os.environ['PUBNUB_LOG_LEVEL'] = 'NONE'
-
 # Configure logging BEFORE importing other modules
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -28,7 +25,6 @@ logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('requests').setLevel(logging.ERROR)
 logging.getLogger('httpx').setLevel(logging.ERROR)
 logging.getLogger('httpcore').setLevel(logging.ERROR)
-logging.getLogger('pubnub').setLevel(logging.WARNING)
 # Disable all INFO logs from modules starting with 'http'
 for name in logging.root.manager.loggerDict:
     if name.startswith('http'):
@@ -60,7 +56,6 @@ except ImportError:
         RESET_ALL = BRIGHT = ""
 
 # Import our modules
-# import pubnub_config
 from arx_control import ARXArm  # Use ARX arm instead of SO101Controller
 
 # Motor configuration
@@ -590,8 +585,7 @@ class SingleFollowerTeleop:
                             self.update_times.pop(0)
                     self.last_update_time = now
                     
-                    # Clear to prevent reprocessing
-                    # self.telemetry_listener.latest_data = None
+
                 except zmq.Again:
                     # No message available, continue
                     pass
@@ -615,16 +609,12 @@ class SingleFollowerTeleop:
     def status_loop(self):
         """Send periodic status updates."""
         while self.running and not shutdown_requested:
-            # self.send_status()
-            time.sleep(2)  # Send status every 2 seconds
+            # TODO: Implement status updates via ZMQ if needed
+            time.sleep(2)  # Check every 2 seconds
             
     def shutdown(self):
         """Clean shutdown."""
         self.running = False
-        
-        # Unsubscribe from channels
-        # if self.pubnub:
-        #     self.pubnub.unsubscribe_all()
         
         # Stop drivetrain motors first
         logger.info("Stopping drivetrain motors...")
@@ -659,12 +649,8 @@ class SingleFollowerTeleop:
 def main():
     # Register signal handler for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
-
-    # SETUP ZMQ RECEIVING:
     
-    
-    
-    parser = argparse.ArgumentParser(description="Single-arm ARX follower-side teleoperation via PubNub")
+    parser = argparse.ArgumentParser(description="Single-arm ARX follower-side teleoperation via ZMQ")
     parser.add_argument("--can_port", type=str, default="can0",
                        help="CAN interface port for ARX robotic arm")
     parser.add_argument("--robot_type", type=int, default=1,
@@ -685,8 +671,7 @@ def main():
     teleop = SingleFollowerTeleop(args.can_port, args.robot_type, args.calibration_file)
     
     try:
-        # Setup
-        # teleop.setup_pubnub()
+        # Connect to follower robot
         teleop.connect_follower()
         
         # Run main loop
