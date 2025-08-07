@@ -34,6 +34,9 @@ for name in logging.root.manager.loggerDict:
     if name.startswith('http'):
         logging.getLogger(name).setLevel(logging.ERROR)
 
+# Suppress CANopen library logs
+logging.getLogger('canopen').setLevel(logging.WARNING)
+
 import argparse
 # import json  # Already imported above
 import platform
@@ -406,7 +409,7 @@ class SingleFollowerTeleop:
         print("Follower set up to ZMQ")
 
         # Set up CANopen for drivetrain controls
-        self.channel = "can0"
+        self.channel = "can1"
         self.bitrate = 1000000
         self.network = canopen.Network()
 
@@ -663,7 +666,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="Single-arm ARX follower-side teleoperation via PubNub")
     parser.add_argument("--can_port", type=str, default="can0",
-                       help="CAN interface port")
+                       help="CAN interface port for ARX robotic arm")
     parser.add_argument("--robot_type", type=int, default=1,
                        help="Robot type (0 for X5lite, 1 for R5)")
     parser.add_argument("--calibration_file", type=str, default="arx_leader_calibration.json",
