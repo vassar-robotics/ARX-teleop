@@ -305,6 +305,7 @@ class ARXArmWrapper:
                     
             # Set arm joint positions (6 joints)
             if len(arm_positions) == 6:
+                logger.debug(f"Setting arm positions: {arm_positions}")
                 self.arm.set_joint_positions(arm_positions)
                 
             # Set gripper position if present
@@ -348,6 +349,7 @@ class ARXArmWrapper:
             # Apply smoothing to arm joint positions (in radians)
             if len(arm_positions) == 6:
                 smoothed_positions = smoother.smooth(arm_positions)
+
                 self.arm.set_joint_positions(smoothed_positions)
                 
             # Set gripper position if present

@@ -45,7 +45,7 @@ CALIBRATION_FILE = "arx_leader_calibration.json"
 
 
 # HARDCODED PORT - Change this to match your setup
-LEADER_PORT = "/dev/tty.usbmodem5A460813891"
+LEADER_PORT = "/dev/tty.usbmodem5A680135841"
 
 
 class LeaderArmCalibrator:

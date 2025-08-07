@@ -24,7 +24,7 @@ import sys
 import time
 import threading
 from typing import Dict, List, Optional
-from servo_controller import SO101Controller
+from vassar_feetech_servo_sdk import ServoController
 
 # Import select for Unix systems
 try:
@@ -110,12 +110,12 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
     """Main teleoperation class for single leader arm."""
     
     # HARDCODED PORT - Change this to switch ports easily
-    LEADER_PORT = "/dev/tty.usbmodem5A460813891"
+    LEADER_PORT = "/dev/tty.usbmodem5A680135841"
     
     def __init__(self, motor_ids: List[int], baudrate: int = 1000000):
         self.motor_ids = motor_ids
         self.baudrate = baudrate
-        self.leader: Optional[SO101Controller] = None  # SIMPLIFIED: Single leader instead of list
+        self.leader: Optional[ServoController] = None  # SIMPLIFIED: Single leader instead of list
         self.running = False
         self.sequence = 0
         
@@ -145,14 +145,25 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
     def connect_leader(self):
         """Connect to the single leader robot."""
         # Use hardcoded port instead of auto-detection
-        leader_port = self.LEADER_PORT
-        print(f"Using hardcoded leader port: {leader_port}")
+        print(f"Using hardcoded leader port: {self.LEADER_PORT}")
         
         # SIMPLIFIED: Single leader object instead of list
-        self.leader = SO101Controller(leader_port, self.motor_ids, self.baudrate, "Leader")
+        # self.leader = ServoController(servo_ids=self.motor_ids, servo_type="hls", port=self.LEADER_PORT)
+        self.leader = ServoController(servo_ids=[1,2,3,4,5,6,7], servo_type="hls", port="/dev/tty.usbmodem5A680135841")
         self.leader.connect()
+
+        positions = self.leader.read_all_positions()
+        for motor_id, pos in positions.items():
+            print(f"Motor {motor_id}: {pos} ({pos/4095*100:.1f}%)")
+
+        # Set servos to middle position
+        success = self.leader.set_middle_position()
+        if success:
+            print("All servos calibrated to middle position!")
+
+
             
-        print(f"{Fore.GREEN}✓ Connected to leader robot at {leader_port}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}✓ Connected to leader robot at {self.LEADER_PORT}{Style.RESET_ALL}")
         
     def setup_pygame(self):
         """Initialize pygame."""
@@ -273,7 +284,7 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         stats = self.monitor.get_stats()
         
         # Build compact status line
-        leader_status = "✓" if self.leader and self.leader.connected else "❌"
+        leader_status = "✓" if self.leader else "❌"
         
         # Network info
         if stats['avg_latency'] > 0:
@@ -330,8 +341,8 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
                 self.draw_status()
                 
                 # Read positions from the leader
-                if self.leader and self.leader.connected:
-                    positions = self.leader.read_positions()
+                if self.leader:
+                    positions = self.leader.read_all_positions()
                     if positions:
                         self.publish_positions(positions)
                     
@@ -376,8 +387,6 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     
     parser = argparse.ArgumentParser(description="Single-arm leader-side teleoperation via ZMQ")
-    parser.add_argument("--motor_ids", type=str, default="1,2,3,4,5,6,7",  # All 7 motors: 1-6 for arm joints, 7 for gripper
-                       help="Comma-separated motor IDs")
     parser.add_argument("--baudrate", type=int, default=1000000,
                        help="Serial baudrate")
     parser.add_argument("--fps", type=int, default=20,
@@ -386,7 +395,7 @@ def main():
     args = parser.parse_args()
     
     # Parse motor IDs
-    motor_ids = [int(id.strip()) for id in args.motor_ids.split(",")]
+    motor_ids = [1,2,3,4,5,6,7]
     
     # Override config FPS if specified
     target_fps = args.fps if args.fps else 20

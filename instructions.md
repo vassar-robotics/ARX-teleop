@@ -60,7 +60,7 @@ sudo ip link set can0 up
 
 #### Quick Calibration
 1. **Connect leader arm** via USB
-2. **Update port** in `single_arx_leader_calib.py` if needed (default: `/dev/tty.usbmodem5A460813891`)
+2. **Update port** in `single_arx_leader_calib.py` if needed (default: `/dev/tty.usbmodem5A680135841`)
 3. **Run calibration:**
    ```bash
    python3 single_arx_leader_calib.py
