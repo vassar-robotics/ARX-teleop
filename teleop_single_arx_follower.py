@@ -376,7 +376,7 @@ class ARXArmWrapper:
         
         # Define gripper range in tics (adjust this based on your gripper's actual range)
         # This assumes ±1000 tics from center gives full gripper range
-        max_gripper_range = 1000.0
+        max_gripper_range = 256.0 # Conversion factor experimentally determined # TODO check this
         
         # Calculate offset from center
         offset = tic_pos - servo_center

@@ -409,8 +409,8 @@ def main():
         # Set up ZMQ streaming
         context = zmq.Context()
         leader_hardware.zmq_socket = context.socket(zmq.PUSH)
-        # leader_hardware.zmq_socket.connect("tcp://192.168.165.119:5000")
-        leader_hardware.zmq_socket.connect("tcp://10.1.10.85:5000")
+        leader_hardware.zmq_socket.connect("tcp://192.168.165.119:5000")
+        # leader_hardware.zmq_socket.connect("tcp://10.1.10.85:5000")
         print("Successfully connected to ZMQ")
         
         # Connect to leader robot
