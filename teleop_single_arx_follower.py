@@ -409,7 +409,9 @@ class SingleFollowerTeleop:
         self.channel = "can0"
         self.bitrate = 1000000
         self.network = canopen.Network()
+
         self.network.connect(interface='socketcan', channel=self.channel, bitrate=self.bitrate)
+
         
         # Add motor nodes BEFORE initializing them
         self.left_motor = self.network.add_node(LEFT_MOTOR_ID, 'chassis_control/rs03.eds')
@@ -551,7 +553,6 @@ class SingleFollowerTeleop:
             avg_interval = sum(self.update_times) / len(self.update_times)
             actual_fps = 1.0 / avg_interval if avg_interval > 0 else 0
             print(f"  Update Rate:     {actual_fps:.1f} Hz")
-           {status} (last data {age:.1f}s ago)")
             
         print()
         print(f"{Fore.CYAN}Press Ctrl+C to stop{Style.RESET_ALL}")
