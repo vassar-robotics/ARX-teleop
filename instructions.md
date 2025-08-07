@@ -24,8 +24,13 @@ Current Agora credentials are based on nate@vassarrobotics.com agora account:
 
 #### 1. Set up CAN interface
 ```bash
+
+# LEADER SIDE - Mac setup 250807: 
+# Operator's LEFT leader: /dev/tty.usbmodem5A680090901
+# Operator's RIGHT leader: /dev/tty.usbmodem5A680135841
 # Find your CAN adapter device (usually /dev/ttyACM0 or /dev/ttyACM1)
 ls /dev/ttyACM*
+or MAC OS: ls /dev/tty.*
 
 # Set up CAN interface (replace /dev/ttyACM0 with your device)
 sudo slcand -o -f -s8 /dev/ttyACM2 can0
