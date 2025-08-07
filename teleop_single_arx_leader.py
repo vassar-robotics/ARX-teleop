@@ -12,6 +12,7 @@ Usage:
 """
 
 import os
+from turtle import right
 import pygame
 import time
 import zmq
@@ -25,6 +26,7 @@ import time
 import threading
 from typing import Dict, List, Optional
 from vassar_feetech_servo_sdk import ServoController
+from Network_Monitor import NetworkMonitor
 
 # Import select for Unix systems
 try:
@@ -54,58 +56,6 @@ def signal_handler(signum, frame):
     shutdown_requested = True
 
 
-class NetworkMonitor:
-    """Monitor network statistics and latency."""
-    
-    def __init__(self):
-        self.sent_count = 0
-        self.ack_count = 0
-        self.last_sent_time = {}
-        self.latencies = []
-        self.max_latency_samples = 100
-        
-    def message_sent(self, sequence: int):
-        """Record when a message was sent."""
-        self.sent_count += 1
-        self.last_sent_time[sequence] = time.time()
-        
-    def message_acknowledged(self, sequence: int, timestamp: float):
-        """Calculate latency when acknowledgment received."""
-        if sequence in self.last_sent_time:
-            latency = (time.time() - self.last_sent_time[sequence]) * 1000  # ms
-            self.latencies.append(latency)
-            if len(self.latencies) > self.max_latency_samples:
-                self.latencies.pop(0)
-            self.ack_count += 1
-            del self.last_sent_time[sequence]
-            return latency
-        return None
-        
-    def get_stats(self) -> Dict:
-        """Get current network statistics."""
-        if not self.latencies:
-            return {
-                "avg_latency": 0, 
-                "max_latency": 0, 
-                "packet_loss": 0,
-                "sent": self.sent_count,
-                "acked": self.ack_count
-            }
-            
-        avg_latency = sum(self.latencies) / len(self.latencies)
-        max_latency = max(self.latencies)
-        expected_acks = self.sent_count // 5  # Only every 5th packet expects ack
-        packet_loss = 1 - (self.ack_count / expected_acks) if expected_acks > 0 else 0
-        
-        return {
-            "avg_latency": avg_latency,
-            "max_latency": max_latency,
-            "packet_loss": packet_loss,
-            "sent": self.sent_count,
-            "acked": self.ack_count
-        }
-
-
 class LeaderHardware: # TODO rename class to MarvinRobot
     """Main keader hardware class for teleoperation"""
     
@@ -118,10 +68,19 @@ class LeaderHardware: # TODO rename class to MarvinRobot
         self.leader_right: Optional[ServoController] = None
         self.running = False
         self.sequence = 0
+        self.GRIPPER_TORQUE_FACTOR = 0.001 # TODO check this
+
+        self.left_positions = None
+        self.right_positions = None
         
-        # Network components
+        # Publish network components
         self.zmq_socket = None
         self.monitor = NetworkMonitor()
+
+        # Receive network components
+        self.s = zmq.Context().socket(zmq.PULL)
+        self.s.bind("tcp://0.0.0.0:5001")
+        print("Leader set up to ZMQ")
         
         # Performance tracking
         self.last_publish_time = 0
@@ -158,6 +117,11 @@ class LeaderHardware: # TODO rename class to MarvinRobot
             print(f"Right motor {motor_id}: {pos} ({pos/4095*100:.1f}%)")
 
         print(f"{Fore.GREEN}✓ Connected to 2 leader robots at {self.left_leader_port} and {self.right_leader_port}{Style.RESET_ALL}")
+    
+    def read_leader_positions(self):
+        """Read positions from the leader robot."""
+        self.left_positions = self.leader_left.read_all_positions()
+        self.right_positions = self.leader_right.read_all_positions()
 
     def disconnect_leader_arms(self):
         """Disconnect from the leader robot."""
@@ -247,6 +211,14 @@ class LeaderHardware: # TODO rename class to MarvinRobot
             "z_speed": self.z_speed
         }
 
+    def apply_force_feedback(self, feedback_message):
+        """Apply force feedback to the leader robot."""
+        print(f"Received feedback message: {feedback_message}")
+        feedback_data = json.loads(feedback_message)
+        left_gripper_torque = self.GRIPPER_TORQUE_FACTOR * (feedback_data["left_delta"]["7"] - self.left_positions["7"])
+        right_gripper_torque = self.GRIPPER_TORQUE_FACTOR * (feedback_data["right_delta"]["7"] - self.right_positions["7"])
+        self.leader_left.set_torque(7, left_gripper_torque)
+        self.leader_right.set_torque(7, right_gripper_torque)
 
     def publish_positions(self, left_positions: Dict[int, int], right_positions: Dict[int, int]):
         """Publish position data via ZMQ."""
@@ -339,13 +311,18 @@ class LeaderHardware: # TODO rename class to MarvinRobot
 
                 self.handle_dt_input(events)
                 self.draw_status()
+
+                # Receive feedback from follower
+                feedback_message = self.s.recv_string(flags=zmq.NOBLOCK)  # Non-blocking receive
+                if feedback_message:
+                    print(f"Received message: {feedback_message}")
                 
                 # Read positions from the leader
                 if self.leader_left and self.leader_right:
-                    left_positions = self.leader_left.read_all_positions()
-                    right_positions = self.leader_right.read_all_positions()
-                    if left_positions and right_positions:
-                        self.publish_positions(left_positions, right_positions)
+                    self.read_leader_positions()
+                    if self.left_positions and self.right_positions:
+                        self.apply_force_feedback(feedback_message)
+                        self.publish_positions(self.left_positions, self.right_positions)
                     
                 # Maintain target rate
                 elapsed = time.time() - loop_start

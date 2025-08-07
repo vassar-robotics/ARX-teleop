@@ -57,6 +57,7 @@ except ImportError:
 
 # Import our modules
 from arx_control import ARXArm  # Use ARX arm instead of SO101Controller
+from Network_Monitor import NetworkMonitor
 
 # Motor configuration
 LEFT_MOTOR_ID = 126
@@ -407,6 +408,13 @@ class FollowerHardware:
         self.s.bind("tcp://0.0.0.0:5000")
         print("Follower set up to ZMQ")
 
+
+
+        # Send Network Components
+        self.zmq_socket = None
+        self.monitor = NetworkMonitor()
+
+
         # Set up CANopen for drivetrain controls and CAN for ARX arms
         self.dt_can = "can0"
         self.left_arm_can = "can1"
@@ -434,17 +442,25 @@ class FollowerHardware:
         self.follower_right.connect()
         
         logger.info(f"{Fore.GREEN}✓ Connected to 2 ARX follower arms {Style.RESET_ALL}")
-     
+    
+    def parse_command_message(self, message: str, arm_name: str):
+        """Parse command message from leader."""
+        data = json.loads(message)
+        positions_data = data.get(arm_name, {})
+
+        # Debug logging
+        logger.debug(f"Received positions: {positions_data}")
+
+        return positions_data
+
     def apply_positions(self, telemetry_data: Dict):
         """Apply received positions to ARX follower robot."""
         timestamp = telemetry_data.get("timestamp", 0)
         sequence = telemetry_data.get("sequence", 0)
-        left_positions_data = telemetry_data.get("left_positions", {})
-        right_positions_data = telemetry_data.get("right_positions", {})
         dt_controls = telemetry_data.get("dt_controls", {})
         
         # Debug logging
-        logger.debug(f"Received positions: {left_positions_data} and {right_positions_data}")
+        logger.debug(f"Received positions: {self.left_command_positions} and {self.right_command_positions}")
         
         # Calculate latency
         latency = (time.time() - timestamp) * 1000  # ms
@@ -464,10 +480,10 @@ class FollowerHardware:
             # Convert string motor IDs back to integers and create position dict
             left_motor_positions = {}
             right_motor_positions = {}
-            for motor_id_str, position in left_positions_data.items():
+            for motor_id_str, position in self.left_command_positions.items():
                 motor_id = int(motor_id_str)
                 left_motor_positions[motor_id] = position
-            for motor_id_str, position in right_positions_data.items():
+            for motor_id_str, position in self.right_command_positions.items():
                 motor_id = int(motor_id_str)
                 right_motor_positions[motor_id] = position
                 
@@ -492,7 +508,46 @@ class FollowerHardware:
         except Exception as e:
             logger.error(f"Error applying positions: {e}")
             
+    def publish_positions(self):
+        """Publish position data via ZMQ."""
+        self.sequence += 1
         
+        # SIMPLIFIED: No mapping needed for single arm - directly use positions
+        # Convert motor IDs to strings for JSON serialization
+        left_actual_position_data = {str(motor_id): int(pos) for motor_id, pos in self.left_actual_positions.items()}
+        right_actual_position_data = {str(motor_id): int(pos) for motor_id, pos in self.right_actual_positions.items()}
+
+        left_command_position_data = {str(motor_id): int(pos) for motor_id, pos in self.left_command_positions.items()}
+        right_command_position_data = {str(motor_id): int(pos) for motor_id, pos in self.right_command_positions.items()}
+
+        left_delta_position_data = {key: left_actual_position_data[key] - left_command_position_data[key] for key in left_actual_position_data.keys()}
+        right_delta_position_data = {key: right_actual_position_data[key] - right_command_position_data[key] for key in right_actual_position_data.keys()}
+
+        message = {
+            "type": "telemetry",
+            "timestamp": time.time(),
+            "sequence": self.sequence,
+            "left_delta": left_delta_position_data,  # Single arm positions
+            "right_delta": right_delta_position_data  # Single arm positions
+        }
+        
+        try:
+            # Send via ZMQ
+            self.zmq_socket.send_string(json.dumps(message))
+            self.monitor.message_sent(self.sequence)
+            
+            # Track publish rate
+            now = time.time()
+            if self.last_publish_time > 0:
+                self.publish_times.append(now - self.last_publish_time)
+                if len(self.publish_times) > 100:
+                    self.publish_times.pop(0)
+            self.last_publish_time = now
+            
+        except Exception as e:
+            print(f"Failed to publish: {e}")
+
+    
     def init_dt_motors(self):
         """Initialize drivetrain motors - all motors in velocity mode for follower."""
         # Initialize all motors in velocity mode (including Z)
@@ -591,8 +646,18 @@ class FollowerHardware:
                 # Check for new telemetry data (blocking receive)
                 try:
                     message = self.s.recv_string(flags=zmq.NOBLOCK)  # Non-blocking receive
+
+                    self.left_command_positions = self.parse_command_message(message, "left_positions")
+                    self.right_command_positions = self.parse_command_message(message, "left_positions")
+
                     # Process the latest data
-                    self.apply_positions(json.loads(message))
+                    self.apply_positions()
+
+                    #Read joint positions and publish them
+                    self.left_actual_positions = self.follower_left.read_joint_tics()
+                    self.right_actual_positions = self.follower_right.read_joint_tics()
+                    if self.left_actual_positions and self.right_actual_positions:
+                        self.publish_positions()
                     
                     # Track update rate
                     now = time.time()
@@ -690,6 +755,12 @@ def main():
     follower_hardware = FollowerHardware(args.can_port, args.robot_type, args.calibration_file)
     
     try:
+        # Set up ZMQ streaming
+        context = zmq.Context()
+        follower_hardware.zmq_socket = context.socket(zmq.PUSH)
+        # follower_hardware.zmq_socket.connect("tcp://192.168.165.119:5001")
+        follower_hardware.zmq_socket.connect("tcp://10.1.10.249:5001")
+        print("Successfully connected to ZMQ")
         # Run main loop
         follower_hardware.teleoperation_loop()
         
