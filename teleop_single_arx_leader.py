@@ -182,7 +182,6 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         pygame.init()
         self.screen = pygame.display.set_mode((400, 320))
         pygame.display.set_caption("RS03 Tank Drive + Z-Axis Control")
-        self.clock = pygame.time.Clock()
 
 
     def draw_status(self):
@@ -247,6 +246,8 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
             self.z_speed =  self.LIFT_SPEED_RPM
         elif keys[pygame.K_e]:
             self.z_speed = -self.LIFT_SPEED_RPM
+        else:
+            self.z_speed = 0
 
         self.left_speed = forward + turn
         self.right_speed = forward - turn
@@ -334,6 +335,7 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         
         try:
             while self.running and not shutdown_requested:
+                
                 loop_start = time.time()
 
                 # TODO check if draw status works here
@@ -434,7 +436,7 @@ def main():
         # SETTING UP NON_PUBNUB STREAMING:
         context = zmq.Context()
         teleop.zmq_socket = context.socket(zmq.PUSH)
-        teleop.zmq_socket.connect("tcp://10.1.10.85:5000")
+        teleop.zmq_socket.connect("tcp://192.168.165.59:5000")
         print("Successfully connected to zmq")
         
         # Setup
