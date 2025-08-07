@@ -25,6 +25,7 @@ import time
 import threading
 from typing import Dict, List, Optional
 from vassar_feetech_servo_sdk import ServoController
+import numpy as np
 
 # Import select for Unix systems
 try:
@@ -254,15 +255,15 @@ class LeaderHardware: # TODO rename class to MarvinRobot
         
         # SIMPLIFIED: No mapping needed for single arm - directly use positions
         # Convert motor IDs to strings for JSON serialization
-        left_position_data = {str(motor_id): int(pos) for motor_id, pos in left_positions.items()}
-        right_position_data = {str(motor_id): int(pos) for motor_id, pos in right_positions.items()}
+        self.left_position_data = {str(motor_id): int(pos) for motor_id, pos in left_positions.items()}
+        self.right_position_data = {str(motor_id): int(pos) for motor_id, pos in right_positions.items()}
         
         message = {
             "type": "telemetry",
             "timestamp": time.time(),
             "sequence": self.sequence,
-            "left_positions": left_position_data,  # Single arm positions
-            "right_positions": right_position_data,  # Single arm positions
+            "left_positions": self.left_position_data,  # Single arm positions
+            "right_positions": self.right_position_data,  # Single arm positions
             "dt_controls": self.dt_controls
         }
         
@@ -346,6 +347,14 @@ class LeaderHardware: # TODO rename class to MarvinRobot
                     right_positions = self.leader_right.read_all_positions()
                     if left_positions and right_positions:
                         self.publish_positions(left_positions, right_positions)
+
+                    # left_torque = {id: 0 for id in range(1,8)}
+                    # left_torque[1] = 0.001*np.sign(self.left_position_data["1"] - 2048)
+                    # right_torque = {id: 0 for id in range(1,8)}
+                    # right_torque[1] = 0.001*np.sign(self.right_position_data["1"] - 2048)
+                    # print(f"Left torque: {left_torque[1]} \t Right torque: {right_torque[1]}")
+                    # self.leader_left.write_torque(left_torque)
+                    # self.leader_right.write_torque(right_torque)
                     
                 # Maintain target rate
                 elapsed = time.time() - loop_start
@@ -409,12 +418,18 @@ def main():
         # Set up ZMQ streaming
         context = zmq.Context()
         leader_hardware.zmq_socket = context.socket(zmq.PUSH)
-        leader_hardware.zmq_socket.connect("tcp://192.168.165.119:5000")
+        leader_hardware.zmq_socket.connect("tcp://192.168.165.16:5000")
+        # leader_hardware.zmq_socket.connect("tcp://marvin.local.tld:5000")
         # leader_hardware.zmq_socket.connect("tcp://10.1.10.85:5000")
         print("Successfully connected to ZMQ")
         
         # Connect to leader robot
         leader_hardware.connect_leader_arms()
+
+        for id in range(1,8):
+            leader_hardware.leader_left.set_operating_mode(id, 2)
+            leader_hardware.leader_right.set_operating_mode(id, 2)
+            time.sleep(0.5)
         
         # Run main loop
         leader_hardware.teleoperation_loop()
