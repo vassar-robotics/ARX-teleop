@@ -218,7 +218,21 @@ class TankDrive:
         self.left_speed = forward + turn
         self.right_speed = forward - turn
         
-        # Apply speeds
+        # Apply speedsevents = pygame.event.get()
+                
+                # Handle system events
+                for event in events:
+                    if event.type == pygame.QUIT:
+                        self.running = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            self.running = False
+                            
+                # Handle continuous input and pass events for single-press detection
+                self.handle_input(events)
+                
+                # Update display
+                self.draw_status()
         self.set_motor_speeds(self.left_speed, self.right_speed)
         
         # Handle Z-axis movement (single press detection)

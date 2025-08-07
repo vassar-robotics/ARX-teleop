@@ -1,13 +1,11 @@
 # ARX Teleoperation Instructions
 
-test
-
 ## Agora Setup
 Current Agora credentials are based on nate@vassarrobotics.com agora account:
 - **Project Name:** teleop-stream-1
 - **App ID:** d1b381fe495547cc867a343c1eceef5d
 - **Primary Certificate:** db2813337e8b46bcb271cd544f19bd63
-- **Temp Token Channel Name:** nate-rnd-250806
+- **Temp Token Channel Name:** nate-rnd-250804
 - **Temp Token:** 007eJxTYJD7UxMYwmq62WDvmX+iQpkHJW5veC207X3kJd5VXd1Zp+IUGFIMk4wtDNNSTSxNTU3Mk5MtzMwTjU2Mkw1Tk1NT00xTrB5NyGgIZGRYv9+ZkZEBAkF8foa8xJJU3aK8FF0jUwMLAxMGBgDySyNg
 
 ⚠️ **Note:** Tokens expire - regenerate if you get "CAN_NOT_GET_GATEWAY_SERVER" errors
@@ -22,13 +20,39 @@ Current Agora credentials are based on nate@vassarrobotics.com agora account:
 
 ### Quick Start
 
+### Naming CAN devices to be persistent on Linux devices with udev rules
+This allows you to never worry about left/right/ can0/1/2 for the various devices plugged in.
+Plug in 1 arm at a time and run this (this only reveals the ARX devices):
+udevadm info -n /dev/ttyACM* | grep serial | head -1
+>> S: serial/by-id/usb-Openlight_Labs_CANable2_b158aa7_github.com_normaldotcom_canable2.git_2079386D3430-if00
+-> Therefore replace "LEFT_SERIAL" with "2079386D3430"
+
+
+RIGHT ARM OUTPUT: (base) ➜  ARX-teleop git:(main) ✗ udevadm info -n /dev/ttyACM* | grep serial | head -1
+S: serial/by-id/usb-Openlight_Labs_CANable2_b158aa7_github.com_normaldotcom_canable2.git_2079386D3430-if00
+
+LEFT ARM OUTPUT: (base) ➜  ARX-teleop git:(main) ✗ udevadm info -n /dev/ttyACM* | grep serial | head -1
+S: serial/by-id/usb-Openlight_Labs_CANable2_b158aa7_github.com_normaldotcom_canable2.git_205234745741-if00
+
+Create the udev rules file:
+sudo vim /etc/udev/rules.d/arx.rules
+
+And add:
+SUBSYSTEM=="tty", ATTRS{serial}=="LEFT-SERIAL", SYMLINK+="arm-l"
+SUBSYSTEM=="tty", ATTRS{serial}=="RIGHT-SERIAL", SYMLINK+="arm-r"
+
+Apply rules:
+sudo udevadm control --reload-rules && sudo udevadm trigger
+
+
 #### 1. Set up CAN interface
 ```bash
 # Find your CAN adapter device (usually /dev/ttyACM0 or /dev/ttyACM1)
 ls /dev/ttyACM*
 
 # Set up CAN interface (replace /dev/ttyACM0 with your device)
-sudo slcand -o -f -s8 /dev/ttyACM2 can0
+# You can also replace with /dev/arm-[r,l] if you followed the linux setup
+sudo slcand -o -f -s8 /dev/ttyACM1 can0
 sudo ip link set can0 up
 ```
 
@@ -60,7 +84,7 @@ sudo ip link set can0 up
 
 #### Quick Calibration
 1. **Connect leader arm** via USB
-2. **Update port** in `single_arx_leader_calib.py` if needed (default: `/dev/tty.usbmodem5A680135841`)
+2. **Update port** in `single_arx_leader_calib.py` if needed (default: `/dev/tty.usbmodem5A460813891`)
 3. **Run calibration:**
    ```bash
    python3 single_arx_leader_calib.py
