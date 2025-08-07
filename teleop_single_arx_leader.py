@@ -300,11 +300,8 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         else:
             rate_info = "Rate: --"
         
-        # Follower count - simplified for now
-        follower_info = f"Followers: 1"
-        
         # Single compact line
-        status_line = f"LEADER {leader_status} | {net_info} | {rate_info} | {follower_info} | Sent: {stats['sent']}"
+        status_line = f"LEADER {leader_status} | {net_info} | {rate_info} | Sent: {stats['sent']}"
         print(f"\r{status_line:<80}", end="", flush=True)
         
     def teleoperation_loop(self):
@@ -407,7 +404,8 @@ def main():
         # Set up ZMQ streaming
         context = zmq.Context()
         teleop.zmq_socket = context.socket(zmq.PUSH)
-        teleop.zmq_socket.connect("tcp://192.168.165.119:5000")
+        # teleop.zmq_socket.connect("tcp://192.168.165.119:5000")
+        teleop.zmq_socket.connect("tcp://10.1.10.85:5000")
         print("Successfully connected to ZMQ")
         
         # Connect to leader robot
