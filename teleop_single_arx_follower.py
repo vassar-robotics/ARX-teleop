@@ -135,7 +135,7 @@ class ARXPositionSmoother:
 class ARXArmWrapper:
     """Wrapper around ARXArm to provide SO101-style interface for teleoperation."""
     
-    def __init__(self, can_port: str = "can0", robot_type: int = 1, calibration_file: str = "arx_leader_calibration.json"):
+    def __init__(self, can_port: str = "can0", robot_type: int = 1, calibration_file: str = "arx_leader_calibration.json", arm_name: str = "left_arm"):
         """Initialize ARX arm wrapper.
         
         Args:
@@ -143,6 +143,7 @@ class ARXArmWrapper:
             robot_type: 1 for R5, 0 for X5lite
             calibration_file: Path to calibration file for leader-follower position mapping
         """
+        self.arm_name = arm_name
         self.arm_config = {
             "can_port": can_port,
             "type": robot_type,
@@ -174,9 +175,9 @@ class ARXArmWrapper:
             with open(self.calibration_file, 'r') as f:
                 calibration_data = json.load(f)
                 
-            home_positions = calibration_data.get("home_positions", {})
-            motor_ids = calibration_data.get("motor_ids", list(range(1, 8)))
-            invert_motors = calibration_data.get("invert_motors", [])
+            home_positions = calibration_data.get(self.arm_name, {}).get("home_positions", {})
+            motor_ids = calibration_data.get(self.arm_name, {}).get("motor_ids", list(range(1, 8)))
+            invert_motors = calibration_data.get(self.arm_name, {}).get("invert_motors", [])
             
             # Convert string keys to int and validate
             servo_centers = {}
@@ -388,14 +389,15 @@ class ARXArmWrapper:
 
 
 
-class SingleFollowerTeleop:
+class FollowerHardware:
     """Main teleoperation class for single ARX follower."""
     
     def __init__(self, can_port: str = "can0", robot_type: int = 1, calibration_file: str = "arx_leader_calibration.json"):
         self.can_port = can_port
         self.robot_type = robot_type
         self.calibration_file = calibration_file
-        self.follower: Optional[ARXArmWrapper] = None  # SIMPLIFIED: Single follower instead of list
+        self.follower_left: Optional[ARXArmWrapper] = None
+        self.follower_right: Optional[ARXArmWrapper] = None
         self.running = False
         # Update tracking
         self.last_update_time = 0
@@ -405,14 +407,15 @@ class SingleFollowerTeleop:
         self.s.bind("tcp://0.0.0.0:5000")
         print("Follower set up to ZMQ")
 
-        # Set up CANopen for drivetrain controls
-        self.channel = "can1"
+        # Set up CANopen for drivetrain controls and CAN for ARX arms
+        self.dt_can = "can0"
+        self.left_arm_can = "can1"
+        self.right_arm_can = "can2"
         self.bitrate = 1000000
         self.network = canopen.Network()
 
-        self.network.connect(interface='socketcan', channel=self.channel, bitrate=self.bitrate)
+        self.network.connect(interface='socketcan', channel=self.dt_can, bitrate=self.bitrate)
 
-        
         # Add motor nodes BEFORE initializing them
         self.left_motor = self.network.add_node(LEFT_MOTOR_ID, 'chassis_control/rs03.eds')
         self.right_motor = self.network.add_node(RIGHT_MOTOR_ID, 'chassis_control/rs03.eds')
@@ -420,25 +423,28 @@ class SingleFollowerTeleop:
         
         # Initialize motors after nodes are added
         self.init_dt_motors()
+        self.init_follower_arms()
         
-        
-    def connect_follower(self):
-        """Connect to the ARX follower robot."""
+    def init_follower_arms(self):
+        """Initialize and connect to the ARX follower robot arms"""
         # SIMPLIFIED: Single follower object instead of list
-        self.follower = ARXArmWrapper(self.can_port, self.robot_type, self.calibration_file)
-        self.follower.connect()
+        self.follower_left = ARXArmWrapper(self.left_arm_can, self.robot_type, self.calibration_file, arm_name="left_arm")
+        self.follower_left.connect()
+        self.follower_right = ARXArmWrapper(self.right_arm_can, self.robot_type, self.calibration_file, arm_name="right_arm")
+        self.follower_right.connect()
         
-        logger.info(f"{Fore.GREEN}✓ Connected to ARX follower robot{Style.RESET_ALL}")
+        logger.info(f"{Fore.GREEN}✓ Connected to 2 ARX follower arms {Style.RESET_ALL}")
      
     def apply_positions(self, telemetry_data: Dict):
         """Apply received positions to ARX follower robot."""
         timestamp = telemetry_data.get("timestamp", 0)
         sequence = telemetry_data.get("sequence", 0)
-        positions_data = telemetry_data.get("positions", {})
+        left_positions_data = telemetry_data.get("left_positions", {})
+        right_positions_data = telemetry_data.get("right_positions", {})
         dt_controls = telemetry_data.get("dt_controls", {})
         
         # Debug logging
-        logger.debug(f"Received positions: {positions_data}")
+        logger.debug(f"Received positions: {left_positions_data} and {right_positions_data}")
         
         # Calculate latency
         latency = (time.time() - timestamp) * 1000  # ms
@@ -447,18 +453,25 @@ class SingleFollowerTeleop:
             self.latencies.pop(0)
       
         # SIMPLIFIED: Direct position application for single arm
-        if not self.follower or not self.follower.connected:
-            logger.warning("No connected follower to apply positions to")
+        if not self.follower_left or not self.follower_left.connected:
+            logger.warning("Left follower not connected to apply positions")
+            return
+        if not self.follower_right or not self.follower_right.connected:
+            logger.warning("Right follower not connected to apply positions")
             return
             
         try:
             # Convert string motor IDs back to integers and create position dict
-            motor_positions = {}
-            for motor_id_str, position in positions_data.items():
+            left_motor_positions = {}
+            right_motor_positions = {}
+            for motor_id_str, position in left_positions_data.items():
                 motor_id = int(motor_id_str)
-                motor_positions[motor_id] = position
+                left_motor_positions[motor_id] = position
+            for motor_id_str, position in right_positions_data.items():
+                motor_id = int(motor_id_str)
+                right_motor_positions[motor_id] = position
                 
-            logger.debug(f"Writing positions to ARX arm: {motor_positions}")
+            logger.debug(f"Writing positions to ARX arm: {left_motor_positions} and {right_motor_positions}")
             
             # Get drivetrain control values (in RPM)
             left_motor_speed = dt_controls.get("left_speed", 0)
@@ -467,12 +480,14 @@ class SingleFollowerTeleop:
 
             # Convert RPM to 0.1 RPM units (as per RS03 manual)
             # and apply to motors
+            #Drivetrain motor speed assignments
             self.left_motor.sdo[TARGET_VELOCITY].raw = int(-left_motor_speed * 10)
             self.right_motor.sdo[TARGET_VELOCITY].raw = int(right_motor_speed * 10)
             self.z_motor.sdo[TARGET_VELOCITY].raw = int(z_motor_speed * 10)
 
             # Apply positions to ARX arm with smoothing
-            self.follower.write_joint_tics(motor_positions)
+            self.follower_left.write_joint_tics(left_motor_positions)
+            self.follower_right.write_joint_tics(right_motor_positions)
             
         except Exception as e:
             logger.error(f"Error applying positions: {e}")
@@ -539,12 +554,12 @@ class SingleFollowerTeleop:
         # Clear screen and move cursor to top
         print("\033[2J\033[H", end="")
         
-        print(f"{Style.BRIGHT}=== SINGLE ARM ARX FOLLOWER TELEOPERATION ==={Style.RESET_ALL}")
+        print(f"{Style.BRIGHT}=== DUAL ARM ARX FOLLOWER TELEOPERATION ==={Style.RESET_ALL}")
         
         # Connected follower
-        print(f"{Style.BRIGHT}Connected Follower:{Style.RESET_ALL}")
-        if self.follower:
-            print(f"  ARX R5 - {'Connected' if self.follower.connected else 'Disconnected'}")
+        print(f"{Style.BRIGHT}Connected Followers:{Style.RESET_ALL}")
+        if self.follower_left and self.follower_right:
+            print(f"  ARX R5 - {'Connected' if self.follower_left.connected and self.follower_right.connected else 'Disconnected'}")
             print(f"  Motors: 6 arm joints + 1 gripper")  # ARX R5 architecture
         print()
         
@@ -630,20 +645,22 @@ class SingleFollowerTeleop:
             logger.warning(f"Failed to disconnect from CAN network: {e}")
             
         # Return to home position and disconnect robot
-        logger.info("Returning ARX arm to home position...")
-        if self.follower and self.follower.connected:
+        logger.info("Returning ARX arms to home position...")
+        if self.follower_left and self.follower_right:
             try:
-                self.follower.arm.go_home()
+                self.follower_left.arm.go_home()
+                self.follower_right.arm.go_home()
                 time.sleep(1)  # Give time for movement
             except Exception as e:
                 logger.warning(f"Failed to return to home position: {e}")
                 
         logger.info("Disconnecting robot...")
-        if self.follower:
+        if self.follower_left and self.follower_right:
             try:
-                self.follower.disconnect()
+                self.follower_left.disconnect()
+                self.follower_right.disconnect()
             except Exception as e:
-                logger.warning(f"Failed to disconnect follower: {e}")
+                logger.warning(f"Failed to disconnect follower(s): {e}")
                 
         logger.info("Shutdown complete")
 
@@ -670,20 +687,17 @@ def main():
         logger.debug("Debug logging enabled")
     
     # Create and run teleoperation
-    teleop = SingleFollowerTeleop(args.can_port, args.robot_type, args.calibration_file)
+    follower_hardware = FollowerHardware(args.can_port, args.robot_type, args.calibration_file)
     
     try:
-        # Connect to follower robot
-        teleop.connect_follower()
-        
         # Run main loop
-        teleop.teleoperation_loop()
+        follower_hardware.teleoperation_loop()
         
     except Exception as e:
         logger.error(f"Error: {e}")
         return 1
     finally:
-        teleop.shutdown()
+        follower_hardware.shutdown()
         
     return 0
 

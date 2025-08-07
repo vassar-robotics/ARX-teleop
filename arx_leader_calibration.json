@@ -1,6 +1,8 @@
 {
-  "timestamp": 1754351791.41208,
+  "timestamp": 1000351791.41208,
   "timestamp_str": "2025-08-04 16:56:31",
+
+  "right_arm": {
   "motor_ids": [
     1,
     2,
@@ -24,5 +26,32 @@
   "voltage": 5.1,
   "is_leader": true,
   "invert_motors": [1, 4, 5],
-  "notes": "Leader arm home positions corresponding to ARX R5 home pose. Motors 3 & 4 inverted for proper follower mapping."
+  "notes": "Right leader arm port and inversion status"
+},
+"left_arm": {
+  "motor_ids": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "home_positions": {
+      "1": 2048,
+      "2": 2048,
+      "3": 2048,
+      "4": 2048,
+      "5": 2048,
+      "6": 2048,
+      "7": 2048
+    },
+    "servo_resolution": 4096,
+    "port": "/dev/cu.usbmodem5A680090901",
+    "voltage": 5.1,
+    "is_leader": true,
+    "invert_motors": [1, 4, 5],
+    "notes": "Left leader arm port and motor inversion status"
+  }
 }

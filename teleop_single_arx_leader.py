@@ -106,16 +106,16 @@ class NetworkMonitor:
         }
 
 
-class SingleLeaderTeleop: # TODO rename class to MarvinRobot
-    """Main teleoperation class for single leader arm."""
+class LeaderHardware: # TODO rename class to MarvinRobot
+    """Main keader hardware class for teleoperation"""
     
-    # HARDCODED PORT - Change this to switch ports easily
-    LEADER_PORT = "/dev/tty.usbmodem5A680135841"
-    
-    def __init__(self, motor_ids: List[int], baudrate: int = 1000000):
+    def __init__(self, motor_ids: List[int], baudrate: int = 1000000, left_leader_port: str = "/dev/tty.usbmodem5A680090901", right_leader_port: str = "/dev/tty.usbmodem5A680135841"):
+        self.left_leader_port = left_leader_port
+        self.right_leader_port = right_leader_port
         self.motor_ids = motor_ids
         self.baudrate = baudrate
-        self.leader: Optional[ServoController] = None  # SIMPLIFIED: Single leader instead of list
+        self.leader_left: Optional[ServoController] = None
+        self.leader_right: Optional[ServoController] = None
         self.running = False
         self.sequence = 0
         
@@ -140,31 +140,32 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
 
         self.setup_pygame()
 
-        
+    
+    def connect_leader_arms(self):
+        """Connect to the leader robot arms."""
 
-    def connect_leader(self):
-        """Connect to the single leader robot."""
-        # Use hardcoded port instead of auto-detection
-        print(f"Using hardcoded leader port: {self.LEADER_PORT}")
-        
-        # SIMPLIFIED: Single leader object instead of list
-        # self.leader = ServoController(servo_ids=self.motor_ids, servo_type="hls", port=self.LEADER_PORT)
-        self.leader = ServoController(servo_ids=[1,2,3,4,5,6,7], servo_type="hls", port="/dev/tty.usbmodem5A680135841")
-        self.leader.connect()
+        self.leader_left = ServoController(servo_ids=[1,2,3,4,5,6,7], servo_type="hls", port=self.left_leader_port)
+        self.leader_right = ServoController(servo_ids=[1,2,3,4,5,6,7], servo_type="hls", port=self.right_leader_port)
+        self.leader_left.connect()
+        self.leader_right.connect()
 
-        positions = self.leader.read_all_positions()
-        for motor_id, pos in positions.items():
-            print(f"Motor {motor_id}: {pos} ({pos/4095*100:.1f}%)")
+        positions_left = self.leader_left.read_all_positions()
+        positions_right = self.leader_right.read_all_positions()
+        for motor_id, pos in positions_left.items():
+            print(f"Left motor {motor_id}: {pos} ({pos/4095*100:.1f}%)")
 
-        # Set servos to middle position
-        success = self.leader.set_middle_position()
-        if success:
-            print("All servos calibrated to middle position!")
+        for motor_id, pos in positions_right.items():
+            print(f"Right motor {motor_id}: {pos} ({pos/4095*100:.1f}%)")
+
+        print(f"{Fore.GREEN}✓ Connected to 2 leader robots at {self.left_leader_port} and {self.right_leader_port}{Style.RESET_ALL}")
+
+    def disconnect_leader_arms(self):
+        """Disconnect from the leader robot."""
+        self.leader_left.disconnect()
+        self.leader_right.disconnect()
+        print(f"{Fore.RED}✗ Disconnected from 2 leader robots at {self.left_leader_port} and {self.right_leader_port}{Style.RESET_ALL}")
 
 
-            
-        print(f"{Fore.GREEN}✓ Connected to leader robot at {self.LEADER_PORT}{Style.RESET_ALL}")
-        
     def setup_pygame(self):
         """Initialize pygame."""
         pygame.init()
@@ -247,19 +248,21 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         }
 
 
-    def publish_positions(self, positions: Dict[int, int]):
+    def publish_positions(self, left_positions: Dict[int, int], right_positions: Dict[int, int]):
         """Publish position data via ZMQ."""
         self.sequence += 1
         
         # SIMPLIFIED: No mapping needed for single arm - directly use positions
         # Convert motor IDs to strings for JSON serialization
-        position_data = {str(motor_id): int(pos) for motor_id, pos in positions.items()}
+        left_position_data = {str(motor_id): int(pos) for motor_id, pos in left_positions.items()}
+        right_position_data = {str(motor_id): int(pos) for motor_id, pos in right_positions.items()}
         
         message = {
             "type": "telemetry",
             "timestamp": time.time(),
             "sequence": self.sequence,
-            "positions": position_data,  # Single arm positions
+            "left_positions": left_position_data,  # Single arm positions
+            "right_positions": right_position_data,  # Single arm positions
             "dt_controls": self.dt_controls
         }
         
@@ -284,7 +287,7 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         stats = self.monitor.get_stats()
         
         # Build compact status line
-        leader_status = "✓" if self.leader else "❌"
+        leader_status = "✓" if self.leader_left and self.leader_right else "❌"
         
         # Network info
         if stats['avg_latency'] > 0:
@@ -338,10 +341,11 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
                 self.draw_status()
                 
                 # Read positions from the leader
-                if self.leader:
-                    positions = self.leader.read_all_positions()
-                    if positions:
-                        self.publish_positions(positions)
+                if self.leader_left and self.leader_right:
+                    left_positions = self.leader_left.read_all_positions()
+                    right_positions = self.leader_right.read_all_positions()
+                    if left_positions and right_positions:
+                        self.publish_positions(left_positions, right_positions)
                     
                 # Maintain target rate
                 elapsed = time.time() - loop_start
@@ -370,9 +374,10 @@ class SingleLeaderTeleop: # TODO rename class to MarvinRobot
         
         # Disconnect robot
         print("Disconnecting robot...")
-        if self.leader:
+        if self.leader_left and self.leader_right:
             try:
-                self.leader.disconnect()
+                self.leader_left.disconnect()
+                self.leader_right.disconnect()
             except Exception as e:
                 print(f"Failed to disconnect leader: {e}")
                 
@@ -398,27 +403,27 @@ def main():
     target_fps = args.fps if args.fps else 20
     
     # Create and run teleoperation
-    teleop = SingleLeaderTeleop(motor_ids, args.baudrate)
+    leader_hardware = LeaderHardware(motor_ids, args.baudrate)
     
     try:
         # Set up ZMQ streaming
         context = zmq.Context()
-        teleop.zmq_socket = context.socket(zmq.PUSH)
-        # teleop.zmq_socket.connect("tcp://192.168.165.119:5000")
-        teleop.zmq_socket.connect("tcp://10.1.10.85:5000")
+        leader_hardware.zmq_socket = context.socket(zmq.PUSH)
+        # leader_hardware.zmq_socket.connect("tcp://192.168.165.119:5000")
+        leader_hardware.zmq_socket.connect("tcp://10.1.10.85:5000")
         print("Successfully connected to ZMQ")
         
         # Connect to leader robot
-        teleop.connect_leader()
+        leader_hardware.connect_leader_arms()
         
         # Run main loop
-        teleop.teleoperation_loop()
+        leader_hardware.teleoperation_loop()
         
     except Exception as e:
         print(f"Error: {e}")
         return 1
     finally:
-        teleop.shutdown()
+        leader_hardware.shutdown()
         
     return 0
 
