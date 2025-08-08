@@ -14,7 +14,7 @@ from i2rt.motor_drivers.dm_driver import (
 )
 from i2rt.robots.robot import Robot
 from i2rt.robots.utils import GripperForceLimiter, GripperType, JointMapper
-from i2rt.utils.mujoco_utils import MuJoCoKDL
+# from i2rt.utils.mujoco_utils import MuJoCoKDL  # COMMENTED: GLFW issue
 
 
 @dataclass
@@ -170,9 +170,11 @@ class MotorChainRobot(Robot):
 
         if xml_path is not None:
             self.xml_path = os.path.expanduser(xml_path)
-            self.kdl = MuJoCoKDL(self.xml_path)
-            if gravity is not None:
-                self.kdl.set_gravity(gravity)
+            # self.kdl = MuJoCoKDL(self.xml_path)  # COMMENTED: GLFW issue
+            # if gravity is not None:
+            #     self.kdl.set_gravity(gravity)
+            print("WARNING: MuJoCo disabled due to GLFW issue - gravity compensation unavailable")
+            self.use_gravity_comp = False  # Force disable gravity comp
         else:
             assert use_gravity_comp is False, "Gravity compensation requires a valid XML path."
 
@@ -317,20 +319,22 @@ class MotorChainRobot(Robot):
         )
 
     def _compute_gravity_compensation(self, joint_state: Optional[Dict[str, np.ndarray]]) -> np.ndarray:
-        if joint_state is None or not self.use_gravity_comp:
-            return np.zeros(len(self.motor_chain))
-        elif self.use_gravity_comp:
-            q = joint_state.pos[: self._gripper_index] if self._gripper_index is not None else joint_state.pos
-            t = self.kdl.compute_inverse_dynamics(q, np.zeros(q.shape), np.zeros(q.shape))
-            # print gravity torque to 2f
-            if np.max(np.abs(t)) > 20.0:
-                print([f"{s:.2f}" for s in t])
-                raise RuntimeError("too large torques")
-            if self._gripper_index is None:
-                return self.kdl.compute_inverse_dynamics(q, np.zeros(q.shape), np.zeros(q.shape))
-            else:
-                t = self.kdl.compute_inverse_dynamics(q, np.zeros(q.shape), np.zeros(q.shape))
-                return np.append(t, 0.0)
+        # COMMENTED: GLFW issue - gravity comp disabled
+        return np.zeros(len(self.motor_chain))
+        # if joint_state is None or not self.use_gravity_comp:
+        #     return np.zeros(len(self.motor_chain))
+        # elif self.use_gravity_comp:
+        #     q = joint_state.pos[: self._gripper_index] if self._gripper_index is not None else joint_state.pos
+        #     t = self.kdl.compute_inverse_dynamics(q, np.zeros(q.shape), np.zeros(q.shape))
+        #     # print gravity torque to 2f
+        #     if np.max(np.abs(t)) > 20.0:
+        #         print([f"{s:.2f}" for s in t])
+        #         raise RuntimeError("too large torques")
+        #     if self._gripper_index is None:
+        #         return self.kdl.compute_inverse_dynamics(q, np.zeros(q.shape), np.zeros(q.shape))
+        #     else:
+        #         t = self.kdl.compute_inverse_dynamics(q, np.zeros(q.shape), np.zeros(q.shape))
+        #         return np.append(t, 0.0)
 
     # ----------------- Server Functions ----------------- #
 

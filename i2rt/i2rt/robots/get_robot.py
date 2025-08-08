@@ -105,8 +105,8 @@ def get_yam_robot(
         MotorChainRobot,
         motor_chain=motor_chain,
         xml_path=model_path,
-        use_gravity_comp=True,
-        gravity_comp_factor=1.3,
+        use_gravity_comp=False,  # CHANGED: disabled due to GLFW issue
+        # gravity_comp_factor=1.3,  # COMMENTED: not needed without gravity comp
         joint_limits=joint_limits,
         kp=kp,
         kd=kd,
