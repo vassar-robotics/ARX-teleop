@@ -243,7 +243,7 @@ def main():
     
     # ARM CONFIGURATION
     arm_config: Dict[str, Any] = {
-        "can_port": "can0",  # CAN interface port
+        "can_port": "can1",  # CAN interface port # 1 is left, 2 is right
         "type": 1,           # 1 for R5 robot, 0 for X5lite
     }
     
