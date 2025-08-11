@@ -481,9 +481,9 @@ class FollowerHardware:
             # Convert RPM to 0.1 RPM units (as per RS03 manual)
             # and apply to motors
             #Drivetrain motor speed assignments
-            self.left_motor.sdo[TARGET_VELOCITY].raw = int(-left_motor_speed * 10)
-            self.right_motor.sdo[TARGET_VELOCITY].raw = int(right_motor_speed * 10)
-            self.z_motor.sdo[TARGET_VELOCITY].raw = int(z_motor_speed * 10)
+            self.left_motor.sdo[TARGET_VELOCITY].raw = int(-left_motor_speed * 5)
+            self.right_motor.sdo[TARGET_VELOCITY].raw = int(right_motor_speed * 5)
+            self.z_motor.sdo[TARGET_VELOCITY].raw = int(z_motor_speed * 5)
 
             # Apply positions to ARX arm with smoothing
             self.follower_left.write_joint_tics(left_motor_positions)
@@ -499,7 +499,7 @@ class FollowerHardware:
         # The follower receives velocity commands, not position commands
         dt_motors = [
             (self.left_motor, "Left"),
-            (self.right_motor, "Right"),
+            (self.right_motor, "Right")#,
             (self.z_motor, "Z")
         ]
         
