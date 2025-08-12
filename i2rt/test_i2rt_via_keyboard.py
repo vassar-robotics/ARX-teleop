@@ -66,14 +66,14 @@ def keyboard_control(stdscr):
         try:
             ee_pose = arm.get_ee_pose_xyzrpy()
             joint_pos = arm.get_joint_positions()
-            joint_vel = arm.get_joint_velocities()
-            joint_curr = arm.get_joint_currents()
+            # joint_vel = arm.get_joint_velocities()
+            # joint_curr = arm.get_joint_currents()
             
             # Display current state
             stdscr.addstr(0, 0, f"EE_POSE: [{' '.join([f'{val:.3f}' for val in ee_pose])}]")
             stdscr.addstr(2, 0, f"JOINT_POS: [{' '.join([f'{val:.3f}' for val in joint_pos])}]")
-            stdscr.addstr(4, 0, f"JOINT_VEL: [{' '.join([f'{val:.3f}' for val in joint_vel])}]")
-            stdscr.addstr(6, 0, f"JOINT_CURR: [{' '.join([f'{val:.3f}' for val in joint_curr])}]")
+            # stdscr.addstr(4, 0, f"JOINT_VEL: [{' '.join([f'{val:.3f}' for val in joint_vel])}]")
+            # stdscr.addstr(6, 0, f"JOINT_CURR: [{' '.join([f'{val:.3f}' for val in joint_curr])}]")
             stdscr.addstr(8, 0, f"CURRENT TARGET: [{' '.join([f'{val:.3f}' for val in xyzrpy])}]")
             stdscr.addstr(10, 0, f"GRIPPER: {gripper:.2f}")
             

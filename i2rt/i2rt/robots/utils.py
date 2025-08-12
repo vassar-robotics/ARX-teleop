@@ -76,7 +76,8 @@ class GripperType(enum.Enum):
         if self == GripperType.YAM_COMPACT_SMALL:
             return "DM4310"
         elif self == GripperType.YAM_LW_GRIPPER:
-            return "DM3507"
+            # return "DM3507"
+            return "DM4310"
         elif self == GripperType.YAM_TEACHING_HANDLE:
             return ""  # or raise NotImplementedError
         else:
