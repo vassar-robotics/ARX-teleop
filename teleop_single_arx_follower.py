@@ -299,15 +299,25 @@ class ARXArmWrapper:
                         # Normal: standard conversion
                         rad_pos = (tic_pos - servo_center) * self.servo_to_radian_scale
                         
+                    # MOTOR SWAP: Temporarily swapping motors 5 and 6
+                    # # TODO: Make this configurable for different robot configurations
+                    # if motor_id == 5:
+                    #     # Motor 5 data goes to motor 6 position (index 5)
+                    #     arm_positions[5] = rad_pos  # Send to motor 6 slot
+                    # elif motor_id == 6:
+                    #     # Motor 6 data goes to motor 5 position (index 4)
+                    #     arm_positions[4] = rad_pos  # Send to motor 5 slot
+                    # else:
+                    #     # All other motors use standard mapping
                     arm_positions[motor_id - 1] = rad_pos  # Convert to 0-indexed
-                    
+                                        
                 elif motor_id == 7:  # Gripper
-                    gripper_position = tic_pos
+                    gripper_position = tic_pos * 3
                     
             # Set arm joint positions (6 joints)
-            if len(arm_positions) == 6:
-                logger.debug(f"Setting arm positions: {arm_positions}")
-                self.arm.set_joint_positions(arm_positions)
+            # if len(arm_positions) == 6:
+            #     logger.debug(f"Setting arm positions: {arm_positions}")
+            self.arm.set_joint_positions(arm_positions)
                 
             # Set gripper position if present
             if gripper_position is not None:
@@ -385,7 +395,11 @@ class ARXArmWrapper:
         gripper_cmd = offset / max_gripper_range
         gripper_cmd = max(-1.0, min(1.0, gripper_cmd))  # Clamp to valid range
         
+<<<<<<< Updated upstream
         return gripper_cmd * 10
+=======
+        return gripper_cmd * 2
+>>>>>>> Stashed changes
 
 
 
@@ -408,7 +422,7 @@ class FollowerHardware:
         print("Follower set up to ZMQ")
 
         # Set up CANopen for drivetrain controls and CAN for ARX arms
-        self.dt_can = "can0"
+        self.dt_can = "candt"
         self.left_arm_can = "can1"
         self.right_arm_can = "can2"
         self.bitrate = 1000000
@@ -481,9 +495,15 @@ class FollowerHardware:
             # Convert RPM to 0.1 RPM units (as per RS03 manual)
             # and apply to motors
             #Drivetrain motor speed assignments
+<<<<<<< Updated upstream
             self.left_motor.sdo[TARGET_VELOCITY].raw = int(-left_motor_speed * 5)
             self.right_motor.sdo[TARGET_VELOCITY].raw = int(right_motor_speed * 5)
             self.z_motor.sdo[TARGET_VELOCITY].raw = int(z_motor_speed * 5)
+=======
+            self.left_motor.sdo[TARGET_VELOCITY].raw = int(-left_motor_speed * 3)
+            self.right_motor.sdo[TARGET_VELOCITY].raw = int(right_motor_speed * 3)
+            self.z_motor.sdo[TARGET_VELOCITY].raw = int(z_motor_speed * 3)
+>>>>>>> Stashed changes
 
             # Apply positions to ARX arm with smoothing
             self.follower_left.write_joint_tics(left_motor_positions)

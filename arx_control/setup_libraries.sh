@@ -11,9 +11,10 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     # tar -xzf arx-libs-linux.tar.gz -C arx_control/lib/
     
     # Or copy from R5 SDK if available
-    if [ -d "/home/vassar/code/R5/py/ARX_R5_python/bimanual/lib" ]; then
+    if [ -d "/home/vassar/R5/py/ARX_R5_python/bimanual/lib" ]; then
         echo "Copying libraries from R5 SDK..."
-        cp -r /home/vassar/code/R5/py/ARX_R5_python/bimanual/lib/* arx_control/lib/
+        cp -r /home/vassar/R5/py/ARX_R5_python/bimanual/lib/* arx_control/lib/
+        cp -r /home/vassar/R5/py/ARX_R5_python/bimanual/api/arx_r5_python/* arx_control/lib/
     else
         echo "ERROR: R5 SDK not found. Please install the ARX R5 SDK first."
         exit 1

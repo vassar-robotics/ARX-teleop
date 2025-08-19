@@ -25,7 +25,7 @@
   "port": "/dev/cu.usbmodem5A680135841",
   "voltage": 5.1,
   "is_leader": true,
-  "invert_motors": [1, 4, 5],
+  "invert_motors": [1, 3, 5, 6],
   "notes": "Right leader arm port and inversion status"
 },
 "left_arm": {
@@ -51,7 +51,7 @@
     "port": "/dev/cu.usbmodem5A680090901",
     "voltage": 5.1,
     "is_leader": true,
-    "invert_motors": [1, 4, 5],
+    "invert_motors": [1, 5, 6],
     "notes": "Left leader arm port and motor inversion status"
   }
 }

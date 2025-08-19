@@ -1,0 +1,5 @@
+SUBSYSTEM=="tty", ENV{ID_BUS}=="usb", ENV{ID_PATH}=="pci-0000:c5:00.3-usb-0:2.2:1.0", \
+    SYMLINK+="slcan1", TAG+="systemd", ENV{SYSTEMD_WANTS}="slcand@1.service"
+SUBSYSTEM=="tty", ENV{ID_BUS}=="usb", ENV{ID_PATH}=="pci-0000:c5:00.3-usb-0:2.1:1.0", \
+    SYMLINK+="slcan2", TAG+="systemd", ENV{SYSTEMD_WANTS}="slcand@2.service"
+
