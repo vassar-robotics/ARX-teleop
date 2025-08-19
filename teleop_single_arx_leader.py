@@ -110,7 +110,7 @@ class NetworkMonitor:
 class LeaderHardware: # TODO rename class to MarvinRobot
     """Main keader hardware class for teleoperation"""
     
-    def __init__(self, motor_ids: List[int], baudrate: int = 1000000, left_leader_port: str = "/dev/tty.usbmodem5A680090901", right_leader_port: str = "/dev/tty.usbmodem5A680135841"):
+    def __init__(self, motor_ids: List[int], baudrate: int = 1000000, left_leader_port: str = "/dev/ttyACM0", right_leader_port: str = "/dev/ttyACM1"):
         self.left_leader_port = left_leader_port
         self.right_leader_port = right_leader_port
         self.motor_ids = motor_ids
